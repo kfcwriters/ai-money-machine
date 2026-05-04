@@ -12,7 +12,7 @@ from fpdf import FPDF
 logging.basicConfig(level=logging.INFO, stream=sys.stdout,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 
-# ---------- API KEYS ----------
+# ---------- API KEYS (all of them, including Twitter & Pinterest) ----------
 GROQ_API_KEY = os.environ["GROQ_API_KEY"]
 GUMROAD_TOKEN = os.environ["GUMROAD_TOKEN"]
 TWITTER_API_KEY = os.environ["TWITTER_API_KEY"]
@@ -144,7 +144,7 @@ def create_pdf(title, content):
     pdf.output(filename)
     return filename
 
-# ---------- GUMROAD ----------
+# ---------- GUMROAD (published = True boolean) ----------
 def publish_to_gumroad(ebook_title, pdf_path, problem_title):
     headers = {"Authorization": f"Bearer {GUMROAD_TOKEN}"}
 
@@ -154,7 +154,7 @@ def publish_to_gumroad(ebook_title, pdf_path, problem_title):
         "name": sanitize_text(ebook_title),
         "description": f"This powerful guide solves: **{sanitize_text(problem_title)}**. Instant download – your action plan inside.",
         "price": "499",
-        "published": "true",
+        "published": True,   # <-- BOOLEAN, NOT STRING
     }
     resp1 = requests.post(create_url, headers=headers, data=product_data, timeout=30)
     if resp1.status_code != 200 or not resp1.json().get("success"):
@@ -177,15 +177,15 @@ def publish_to_gumroad(ebook_title, pdf_path, problem_title):
 
     return short_url
 
-# ---------- HASKNODE (UPDATED MUTATION) ----------
+# ---------- HASKNODE (publish live) ----------
 def publish_hashnode_article(ebook_title, problem_title, gumroad_url):
-    # Updated mutation using CreateDraftInput (based on Hashnode's latest API)
     query = """
-    mutation CreateDraft($input: CreateDraftInput!) {
-      createDraft(input: $input) {
-        draft {
+    mutation PublishPost($input: PublishPostInput!) {
+      publishPost(input: $input) {
+        post {
           id
           slug
+          url
         }
       }
     }
@@ -200,7 +200,7 @@ def publish_hashnode_article(ebook_title, problem_title, gumroad_url):
             "contentMarkdown": blog_body,
             "publicationId": HASKNODE_PUBLICATION_ID,
             "tags": [],
-            "isHidden": False
+            "disableComments": False
         }
     }
     headers = {
@@ -219,15 +219,17 @@ def publish_hashnode_article(ebook_title, problem_title, gumroad_url):
         if "errors" in data:
             logging.error("Hashnode GraphQL errors: %s", json.dumps(data["errors"]))
         else:
-            slug = data.get("data", {}).get("createDraft", {}).get("draft", {}).get("slug", "")
+            post_info = data.get("data", {}).get("publishPost", {}).get("post", {})
+            slug = post_info.get("slug", "")
+            url = post_info.get("url", "")
             if slug:
-                logging.info(f"Hashnode draft created: {HASKNODE_PUBLICATION_ID}/{slug}")
-            else:
-                logging.warning("Hashnode draft created but no slug returned.")
+                logging.info(f"Hashnode post published: {slug}")
+            if url:
+                logging.info(f"Public URL: {url}")
     else:
         logging.error(f"Hashnode request failed: {response.text}")
 
-# ---------- TWITTER ----------
+# ---------- TWITTER (kept, will fail gracefully until you buy credits) ----------
 def send_tweet(ebook_title, gumroad_url):
     client = tweepy.Client(
         consumer_key=TWITTER_API_KEY,
@@ -236,26 +238,24 @@ def send_tweet(ebook_title, gumroad_url):
         access_token_secret=TWITTER_ACCESS_TOKEN_SECRET
     )
     tweet_text = f"💡 Just created a quick fix for: {sanitize_text(ebook_title)}\n\nInstant $4.99 guide → {gumroad_url}"
-    try:
-        client.create_tweet(text=tweet_text)
-        logging.info("Tweet sent.")
-    except tweepy.TweepyException as e:
-        logging.error(f"Tweet failed: {e}")
+    client.create_tweet(text=tweet_text)
+    logging.info("Tweet sent.")
 
-# ---------- PINTEREST (skip) ----------
+# ---------- PINTEREST (placeholder, kept) ----------
 def create_pin(gumroad_url, ebook_title):
     if not PINTEREST_ACCESS_TOKEN:
         logging.info("Pinterest token not set. Skipping pin.")
         return
     logging.info("Pinterest pin creation skipped (needs image).")
 
-# ---------- MAIN (ROBUST) ----------
+# ---------- MAIN (all parts, failures don't crash) ----------
 def main():
     logging.info("=== AI Money Machine Run Starting ===")
     problem = None
     ebook_title = None
     gumroad_url = None
 
+    # --- MANDATORY STEPS (if they fail, the run stops) ---
     try:
         problem = get_trending_problem()
         logging.info(f"Problem: {problem}")
@@ -284,7 +284,7 @@ def main():
         logging.exception("Failed to publish to Gumroad.")
         sys.exit(1)
 
-    # Optional steps – failures are logged but don't crash the machine
+    # --- OPTIONAL STEPS (failures are logged but the machine continues) ---
     try:
         publish_hashnode_article(ebook_title, problem, gumroad_url)
     except Exception as e:
@@ -293,12 +293,12 @@ def main():
     try:
         send_tweet(ebook_title, gumroad_url)
     except Exception as e:
-        logging.exception("Tweet failed, continuing anyway.")
+        logging.exception(f"Tweet failed: {e}")
 
     try:
         create_pin(gumroad_url, ebook_title)
     except Exception as e:
-        logging.exception("Pinterest failed, continuing anyway.")
+        logging.exception(f"Pinterest failed: {e}")
 
     logging.info("=== AI Money Machine Run Completed Successfully ===")
     if gumroad_url:
