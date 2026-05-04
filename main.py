@@ -76,42 +76,36 @@ Title of eBook:
 
 # ---------- TEXT SANITIZER ----------
 def sanitize_text(text):
-    """Replace common Unicode chars that aren't in basic Latin-1 with ASCII equivalents."""
     replacements = {
-        '\u2018': "'", '\u2019': "'",  # smart single quotes
-        '\u201c': '"', '\u201d': '"',  # smart double quotes
-        '\u2013': '-', '\u2014': '--', # en/em dashes
-        '\u2026': '...',               # ellipsis
-        '\u2022': '-', '\u2023': '-',  # bullets
-        '\u25e6': '-',                 # white bullet
-        '\u00a0': ' ',                 # non-breaking space
-        '\u00ad': '',                  # soft hyphen
-        '\u00b7': '-',                 # middle dot
+        '\u2018': "'", '\u2019': "'",
+        '\u201c': '"', '\u201d': '"',
+        '\u2013': '-', '\u2014': '--',
+        '\u2026': '...',
+        '\u2022': '-', '\u2023': '-',
+        '\u25e6': '-',
+        '\u00a0': ' ',
+        '\u00ad': '',
+        '\u00b7': '-',
     }
-    # Replace known characters
     for orig, new in replacements.items():
         text = text.replace(orig, new)
-    # Remove any remaining non-ASCII or control characters (except newlines)
     cleaned = []
     for ch in text:
         if ord(ch) < 128 or ch == '\n':
             cleaned.append(ch)
         else:
-            # Replace unknown Unicode with a question mark or remove
             cleaned.append('?')
     return ''.join(cleaned)
 
-# ---------- PDF (Unicode‑safe) ----------
+# ---------- PDF (Unicode-safe) ----------
 def create_pdf(title, content):
     pdf = FPDF()
     pdf.add_page()
     pdf.set_auto_page_break(auto=True, margin=15)
 
-    # Add a Unicode-capable font (DejaVu Sans is available on GitHub Ubuntu runners)
     pdf.add_font("DejaVu", "", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", uni=True)
     pdf.add_font("DejaVu", "B", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", uni=True)
 
-    # Title
     pdf.set_font("DejaVu", "B", 16)
     pdf.cell(0, 10, sanitize_text(title), ln=True, align="C")
     pdf.ln(10)
@@ -138,7 +132,6 @@ def create_pdf(title, content):
         else:
             pdf.set_font("DejaVu", size=11)
             if len(line) > max_chars and " " not in line:
-                # long unbreakable line: wrap manually
                 for part in textwrap.wrap(line, width=max_chars):
                     pdf.cell(0, 6, part, ln=True)
             else:
@@ -152,27 +145,27 @@ def create_pdf(title, content):
     pdf.output(filename)
     return filename
 
-# ---------- GUMROAD ----------
+# ---------- GUMROAD (SINGLE-STEP UPLOAD) ----------
 def publish_to_gumroad(ebook_title, pdf_path, problem_title):
     url = "https://api.gumroad.com/v2/products"
     headers = {"Authorization": f"Bearer {GUMROAD_TOKEN}"}
-    data = {
+
+    # Create the product with the file in one request (multipart/form-data)
+    fields = {
         "name": sanitize_text(ebook_title),
         "description": f"This powerful guide solves: **{sanitize_text(problem_title)}**. Instant download – your action plan inside.",
-        "price": 499,
+        "price": "499",
         "published": "true",
     }
-    resp = requests.post(url, headers=headers, data=data, timeout=30)
-    resp.raise_for_status()
-    product_info = resp.json()["product"]
-    product_id = product_info["id"]
-
-    upload_url = f"https://api.gumroad.com/v2/products/{product_id}/variant_files"
     with open(pdf_path, "rb") as f:
         files = {"file": ("product.pdf", f, "application/pdf")}
-        resp2 = requests.post(upload_url, headers={"Authorization": f"Bearer {GUMROAD_TOKEN}"}, files=files, timeout=30)
-        resp2.raise_for_status()
+        resp = requests.post(url, headers=headers, data=fields, files=files, timeout=60)
 
+    if resp.status_code != 200:
+        logging.error(f"Gumroad creation failed: {resp.status_code} - {resp.text}")
+        resp.raise_for_status()
+
+    product_info = resp.json()["product"]
     short_url = product_info.get("short_url", "no-url")
     logging.info(f"Gumroad product created: {short_url}")
     return short_url
