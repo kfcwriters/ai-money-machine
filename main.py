@@ -12,7 +12,7 @@ from fpdf import FPDF
 logging.basicConfig(level=logging.INFO, stream=sys.stdout,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 
-# ---------- API KEYS (all of them, including Twitter & Pinterest) ----------
+# ---------- API KEYS ----------
 GROQ_API_KEY = os.environ["GROQ_API_KEY"]
 GUMROAD_TOKEN = os.environ["GUMROAD_TOKEN"]
 TWITTER_API_KEY = os.environ["TWITTER_API_KEY"]
@@ -20,7 +20,7 @@ TWITTER_API_KEY_SECRET = os.environ["TWITTER_API_KEY_SECRET"]
 TWITTER_ACCESS_TOKEN = os.environ["TWITTER_ACCESS_TOKEN"]
 TWITTER_ACCESS_TOKEN_SECRET = os.environ["TWITTER_ACCESS_TOKEN_SECRET"]
 HASKNODE_TOKEN = os.environ["HASKNODE_TOKEN"]
-HASKNODE_PUBLICATION_ID = os.environ["HASKNODE_PUBLICATION_ID"]
+HASKNODE_PUBLICATION_HOST = os.environ["HASKNODE_PUBLICATION_ID"]  # still the domain
 PINTEREST_ACCESS_TOKEN = os.environ.get("PINTEREST_ACCESS_TOKEN", "")
 
 # ---------- GROQ ----------
@@ -144,17 +144,16 @@ def create_pdf(title, content):
     pdf.output(filename)
     return filename
 
-# ---------- GUMROAD (published = True boolean) ----------
+# ---------- GUMROAD ----------
 def publish_to_gumroad(ebook_title, pdf_path, problem_title):
     headers = {"Authorization": f"Bearer {GUMROAD_TOKEN}"}
 
-    # Step 1: Create product
     create_url = "https://api.gumroad.com/v2/products"
     product_data = {
         "name": sanitize_text(ebook_title),
         "description": f"This powerful guide solves: **{sanitize_text(problem_title)}**. Instant download – your action plan inside.",
         "price": "499",
-        "published": True,   # <-- BOOLEAN, NOT STRING
+        "published": True,
     }
     resp1 = requests.post(create_url, headers=headers, data=product_data, timeout=30)
     if resp1.status_code != 200 or not resp1.json().get("success"):
@@ -165,7 +164,6 @@ def publish_to_gumroad(ebook_title, pdf_path, problem_title):
     short_url = product_info.get("short_url", "no-url")
     logging.info(f"Gumroad product created: {short_url}")
 
-    # Step 2: Upload file
     upload_url = f"https://api.gumroad.com/v2/products/{product_id}/variant_files"
     with open(pdf_path, "rb") as f:
         files = {"file": ("product.pdf", f, "application/pdf")}
@@ -177,8 +175,32 @@ def publish_to_gumroad(ebook_title, pdf_path, problem_title):
 
     return short_url
 
-# ---------- HASKNODE (publish live) ----------
+# ---------- HELPER: get real publication ID from host ----------
+def get_hasnode_publication_id():
+    query = """
+    query($host: String!) {
+      publication(host: $host) {
+        id
+      }
+    }
+    """
+    variables = {"host": HASKNODE_PUBLICATION_HOST}
+    headers = {"Authorization": HASKNODE_TOKEN, "Content-Type": "application/json"}
+    resp = requests.post("https://gql.hashnode.com/", json={"query": query, "variables": variables}, headers=headers, timeout=30)
+    if resp.status_code == 200:
+        data = resp.json()
+        pub_id = data.get("data", {}).get("publication", {}).get("id")
+        if pub_id:
+            logging.info(f"Resolved publication ID: {pub_id}")
+            return pub_id
+    logging.error("Could not fetch publication ID. Using host as fallback.")
+    return HASKNODE_PUBLICATION_HOST  # fallback (will likely fail)
+
+# ---------- HASKNODE (publish live, with correct ID) ----------
 def publish_hashnode_article(ebook_title, problem_title, gumroad_url):
+    # Get the real ObjectId
+    publication_id = get_hasnode_publication_id()
+
     query = """
     mutation PublishPost($input: PublishPostInput!) {
       publishPost(input: $input) {
@@ -198,7 +220,7 @@ def publish_hashnode_article(ebook_title, problem_title, gumroad_url):
         "input": {
             "title": f"How to {sanitize_text(ebook_title)}",
             "contentMarkdown": blog_body,
-            "publicationId": HASKNODE_PUBLICATION_ID,
+            "publicationId": publication_id,
             "tags": [],
             "disableComments": False
         }
@@ -229,7 +251,7 @@ def publish_hashnode_article(ebook_title, problem_title, gumroad_url):
     else:
         logging.error(f"Hashnode request failed: {response.text}")
 
-# ---------- TWITTER (kept, will fail gracefully until you buy credits) ----------
+# ---------- TWITTER ----------
 def send_tweet(ebook_title, gumroad_url):
     client = tweepy.Client(
         consumer_key=TWITTER_API_KEY,
@@ -241,21 +263,20 @@ def send_tweet(ebook_title, gumroad_url):
     client.create_tweet(text=tweet_text)
     logging.info("Tweet sent.")
 
-# ---------- PINTEREST (placeholder, kept) ----------
+# ---------- PINTEREST ----------
 def create_pin(gumroad_url, ebook_title):
     if not PINTEREST_ACCESS_TOKEN:
         logging.info("Pinterest token not set. Skipping pin.")
         return
     logging.info("Pinterest pin creation skipped (needs image).")
 
-# ---------- MAIN (all parts, failures don't crash) ----------
+# ---------- MAIN ----------
 def main():
     logging.info("=== AI Money Machine Run Starting ===")
     problem = None
     ebook_title = None
     gumroad_url = None
 
-    # --- MANDATORY STEPS (if they fail, the run stops) ---
     try:
         problem = get_trending_problem()
         logging.info(f"Problem: {problem}")
@@ -284,7 +305,7 @@ def main():
         logging.exception("Failed to publish to Gumroad.")
         sys.exit(1)
 
-    # --- OPTIONAL STEPS (failures are logged but the machine continues) ---
+    # Optional steps
     try:
         publish_hashnode_article(ebook_title, problem, gumroad_url)
     except Exception as e:
