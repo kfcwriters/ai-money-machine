@@ -3,6 +3,7 @@ import sys
 import json
 import logging
 import textwrap
+import unicodedata
 
 import requests
 import tweepy
@@ -73,47 +74,78 @@ Title of eBook:
         ebook_title = "Ultimate Guide to " + problem_title
     return ebook_title, content
 
-# ---------- PDF (with long line fix) ----------
+# ---------- TEXT SANITIZER ----------
+def sanitize_text(text):
+    """Replace common Unicode chars that aren't in basic Latin-1 with ASCII equivalents."""
+    replacements = {
+        '\u2018': "'", '\u2019': "'",  # smart single quotes
+        '\u201c': '"', '\u201d': '"',  # smart double quotes
+        '\u2013': '-', '\u2014': '--', # en/em dashes
+        '\u2026': '...',               # ellipsis
+        '\u2022': '-', '\u2023': '-',  # bullets
+        '\u25e6': '-',                 # white bullet
+        '\u00a0': ' ',                 # non-breaking space
+        '\u00ad': '',                  # soft hyphen
+        '\u00b7': '-',                 # middle dot
+    }
+    # Replace known characters
+    for orig, new in replacements.items():
+        text = text.replace(orig, new)
+    # Remove any remaining non-ASCII or control characters (except newlines)
+    cleaned = []
+    for ch in text:
+        if ord(ch) < 128 or ch == '\n':
+            cleaned.append(ch)
+        else:
+            # Replace unknown Unicode with a question mark or remove
+            cleaned.append('?')
+    return ''.join(cleaned)
+
+# ---------- PDF (Unicode‑safe) ----------
 def create_pdf(title, content):
     pdf = FPDF()
     pdf.add_page()
     pdf.set_auto_page_break(auto=True, margin=15)
-    pdf.set_font("Helvetica", "B", 16)
-    pdf.cell(0, 10, title, ln=True, align="C")
-    pdf.ln(10)
-    pdf.set_font("Helvetica", size=11)
 
-    effective_width = pdf.w - pdf.l_margin - pdf.r_margin  # usable width in mm
-    # effective_width is typically around 190, but we'll use it as character width estimate
-    max_chars_per_line = int(effective_width / 2)  # rough approximation
+    # Add a Unicode-capable font (DejaVu Sans is available on GitHub Ubuntu runners)
+    pdf.add_font("DejaVu", "", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", uni=True)
+    pdf.add_font("DejaVu", "B", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", uni=True)
+
+    # Title
+    pdf.set_font("DejaVu", "B", 16)
+    pdf.cell(0, 10, sanitize_text(title), ln=True, align="C")
+    pdf.ln(10)
+
+    effective_width = pdf.w - pdf.l_margin - pdf.r_margin
+    max_chars = int(effective_width / 2)
 
     for raw_line in content.split("\n"):
-        line = raw_line.strip()
+        line = sanitize_text(raw_line).strip()
         if not line:
             continue
 
         if line.startswith("## "):
-            pdf.set_font("Helvetica", "B", 13)
+            pdf.set_font("DejaVu", "B", 13)
             pdf.cell(0, 8, line[3:], ln=True)
-            pdf.set_font("Helvetica", size=11)
+            pdf.set_font("DejaVu", size=11)
         elif line.startswith("# "):
-            pdf.set_font("Helvetica", "B", 15)
+            pdf.set_font("DejaVu", "B", 15)
             pdf.cell(0, 8, line[2:], ln=True)
-            pdf.set_font("Helvetica", size=11)
+            pdf.set_font("DejaVu", size=11)
         elif line.startswith("- "):
-            pdf.cell(0, 6, "  • " + line[2:], ln=True)
+            pdf.set_font("DejaVu", size=11)
+            pdf.cell(0, 6, "  - " + line[2:], ln=True)
         else:
-            # If the line has no spaces and is extremely long, break it
-            if len(line) > max_chars_per_line and " " not in line:
-                parts = textwrap.wrap(line, width=max_chars_per_line)
-                for part in parts:
+            pdf.set_font("DejaVu", size=11)
+            if len(line) > max_chars and " " not in line:
+                # long unbreakable line: wrap manually
+                for part in textwrap.wrap(line, width=max_chars):
                     pdf.cell(0, 6, part, ln=True)
             else:
                 try:
                     pdf.multi_cell(0, 6, line)
                 except Exception as e:
-                    logging.warning(f"PDF multi_cell failed for line: {line[:80]}... Error: {e}")
-                    # fallback: just write as-is with cell
+                    logging.warning(f"PDF error on line: {line[:80]}... {e}")
                     pdf.cell(0, 6, line, ln=True)
 
     filename = "product.pdf"
@@ -125,8 +157,8 @@ def publish_to_gumroad(ebook_title, pdf_path, problem_title):
     url = "https://api.gumroad.com/v2/products"
     headers = {"Authorization": f"Bearer {GUMROAD_TOKEN}"}
     data = {
-        "name": ebook_title,
-        "description": f"This powerful guide solves: **{problem_title}**. Instant download – your action plan inside.",
+        "name": sanitize_text(ebook_title),
+        "description": f"This powerful guide solves: **{sanitize_text(problem_title)}**. Instant download – your action plan inside.",
         "price": 499,
         "published": "true",
     }
@@ -165,7 +197,7 @@ def publish_hashnode_article(ebook_title, problem_title, gumroad_url):
 
     variables = {
         "input": {
-            "title": f"How to {ebook_title}",
+            "title": f"How to {sanitize_text(ebook_title)}",
             "contentMarkdown": blog_body,
             "publicationId": HASKNODE_PUBLICATION_ID,
             "tags": [],
@@ -197,14 +229,14 @@ def send_tweet(ebook_title, gumroad_url):
         access_token=TWITTER_ACCESS_TOKEN,
         access_token_secret=TWITTER_ACCESS_TOKEN_SECRET
     )
-    tweet_text = f"💡 Just created a quick fix for: {ebook_title}\n\nInstant $4.99 guide → {gumroad_url}"
+    tweet_text = f"💡 Just created a quick fix for: {sanitize_text(ebook_title)}\n\nInstant $4.99 guide → {gumroad_url}"
     try:
         client.create_tweet(text=tweet_text)
         logging.info("Tweet sent.")
     except tweepy.TweepyException as e:
         logging.error(f"Tweet failed: {e}")
 
-# ---------- PINTEREST (skip) ----------
+# ---------- PINTEREST ----------
 def create_pin(gumroad_url, ebook_title):
     if not PINTEREST_ACCESS_TOKEN:
         logging.info("Pinterest token not set. Skipping pin.")
