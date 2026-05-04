@@ -2,7 +2,6 @@ import os
 import sys
 import json
 import logging
-import random
 
 import requests
 import tweepy
@@ -23,7 +22,7 @@ HASKNODE_TOKEN = os.environ["HASKNODE_TOKEN"]
 HASKNODE_PUBLICATION_ID = os.environ["HASKNODE_PUBLICATION_ID"]
 PINTEREST_ACCESS_TOKEN = os.environ.get("PINTEREST_ACCESS_TOKEN", "")
 
-# ---------- GEMINI HELPERS ----------
+# ---------- GEMINI ----------
 def gemini_generate(prompt):
     url = f"https://generativelanguage.googleapis.com/v1/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
     headers = {"Content-Type": "application/json"}
@@ -48,12 +47,11 @@ Only return the problem title as a single sentence. Do not add any extra text.
 Example: "How to create a morning routine that actually sticks"
 """
     problem = gemini_generate(prompt).strip()
-    # Clean any quotes or extra spaces
     problem = problem.strip('"').strip()
     logging.info(f"Gemini trending problem: {problem}")
     return problem
 
-# ---------- PRODUCT CONTENT GENERATION ----------
+# ---------- PRODUCT CONTENT ----------
 def generate_product(problem_title):
     prompt = f"""You are a top digital product creator. Based on the problem below, write a high-value, actionable eBook (about 500 words) that solves it. Write in Markdown format. Include a catchy title, introduction, 5 practical steps, and a summary checklist.
 
@@ -70,7 +68,7 @@ Title of eBook:
         ebook_title = "Ultimate Guide to " + problem_title
     return ebook_title, content
 
-# ---------- PDF CREATION ----------
+# ---------- PDF ----------
 def create_pdf(title, content):
     pdf = FPDF()
     pdf.add_page()
@@ -99,7 +97,7 @@ def create_pdf(title, content):
     pdf.output(filename)
     return filename
 
-# ---------- GUMROAD UPLOAD ----------
+# ---------- GUMROAD ----------
 def publish_to_gumroad(ebook_title, pdf_path, problem_title):
     url = "https://api.gumroad.com/v2/products"
     headers = {"Authorization": f"Bearer {GUMROAD_TOKEN}"}
@@ -124,7 +122,7 @@ def publish_to_gumroad(ebook_title, pdf_path, problem_title):
     logging.info(f"Gumroad product created: {short_url}")
     return short_url
 
-# ---------- HASKNODE BLOG ----------
+# ---------- HASKNODE ----------
 def publish_hashnode_article(ebook_title, problem_title, gumroad_url):
     query = """
     mutation CreateStory($input: CreateStoryInput!) {
@@ -183,7 +181,7 @@ def send_tweet(ebook_title, gumroad_url):
     except tweepy.TweepyException as e:
         logging.error(f"Tweet failed: {e}")
 
-# ---------- PINTEREST (SKIP) ----------
+# ---------- PINTEREST (skip) ----------
 def create_pin(gumroad_url, ebook_title):
     if not PINTEREST_ACCESS_TOKEN:
         logging.info("Pinterest token not set. Skipping pin.")
