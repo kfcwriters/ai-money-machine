@@ -3,7 +3,6 @@ import sys
 import json
 import logging
 import textwrap
-import unicodedata
 
 import requests
 import tweepy
@@ -97,7 +96,7 @@ def sanitize_text(text):
             cleaned.append('?')
     return ''.join(cleaned)
 
-# ---------- PDF ----------
+# ---------- PDF (Unicode-safe) ----------
 def create_pdf(title, content):
     pdf = FPDF()
     pdf.add_page()
@@ -145,45 +144,49 @@ def create_pdf(title, content):
     pdf.output(filename)
     return filename
 
-# ---------- GUMROAD (WITH FULL LOGGING) ----------
+# ---------- GUMROAD (TWO-STEP UPLOAD) ----------
 def publish_to_gumroad(ebook_title, pdf_path, problem_title):
-    url = "https://api.gumroad.com/v2/products"
     headers = {"Authorization": f"Bearer {GUMROAD_TOKEN}"}
 
-    fields = {
+    # Step 1: Create product without file
+    create_url = "https://api.gumroad.com/v2/products"
+    product_data = {
         "name": sanitize_text(ebook_title),
         "description": f"This powerful guide solves: **{sanitize_text(problem_title)}**. Instant download – your action plan inside.",
         "price": "499",
         "published": "true",
     }
+    resp1 = requests.post(create_url, headers=headers, data=product_data, timeout=30)
+    logging.info(f"Gumroad create status: {resp1.status_code}")
+    logging.debug(f"Gumroad create response: {resp1.text}")
+
+    if resp1.status_code != 200:
+        logging.error(f"Gumroad product creation failed: {resp1.text}")
+        resp1.raise_for_status()
+
+    create_json = resp1.json()
+    if not create_json.get("success", False):
+        logging.error(f"Gumroad product creation not successful: {create_json}")
+        raise Exception(f"Gumroad product creation failed: {create_json.get('message')}")
+
+    product_info = create_json["product"]
+    product_id = product_info["id"]
+    short_url = product_info.get("short_url", "no-url")
+    logging.info(f"Gumroad product created (ID: {product_id}), short URL: {short_url}")
+
+    # Step 2: Upload the file to the product
+    upload_url = f"https://api.gumroad.com/v2/products/{product_id}/variant_files"
     with open(pdf_path, "rb") as f:
         files = {"file": ("product.pdf", f, "application/pdf")}
-        resp = requests.post(url, headers=headers, data=fields, files=files, timeout=60)
-
-    logging.info(f"Gumroad status code: {resp.status_code}")
-    logging.info(f"Gumroad response: {resp.text}")
-
-    if resp.status_code != 200:
-        logging.error("Gumroad creation failed.")
-        resp.raise_for_status()
-
-    resp_json = resp.json()
-
-    # Try to extract product URL from different possible response structures
-    if "product" in resp_json:
-        product_data = resp_json["product"]
-        short_url = product_data.get("short_url", "no-url")
-    elif "short_url" in resp_json:
-        short_url = resp_json["short_url"]
-    elif "id" in resp_json:
-        # Manually construct the Gumroad product URL (typical pattern)
-        product_id = resp_json["id"]
-        short_url = f"https://gumroad.com/l/{product_id}"
+        resp2 = requests.post(upload_url, headers=headers, files=files, timeout=60)
+    logging.info(f"Gumroad file upload status: {resp2.status_code}")
+    if resp2.status_code != 200:
+        logging.error(f"Gumroad file upload failed: {resp2.text}")
+        # Even if file upload fails, we still return the product URL
+        # The product will exist but without a file (you can manually add it if needed)
     else:
-        logging.error(f"Unexpected Gumroad response structure: {resp_json}")
-        raise KeyError("Could not find product URL in Gumroad response")
+        logging.info("File uploaded successfully.")
 
-    logging.info(f"Gumroad product created: {short_url}")
     return short_url
 
 # ---------- HASKNODE ----------
