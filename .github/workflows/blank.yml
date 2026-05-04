@@ -2,8 +2,8 @@ name: AI Money Machine Daily Run
 
 on:
   schedule:
-    - cron: '0 8 * * *'   # Runs every day at 8:00 UTC
-  workflow_dispatch:      # Lets you manually trigger a run with a button
+    - cron: '0 8 * * *'   # Daily at 8:00 UTC
+  workflow_dispatch:      # Manual trigger button
 
 jobs:
   run-script:
@@ -18,10 +18,17 @@ jobs:
           python-version: '3.11'
 
       - name: Install libraries
-        run: pip install requests fpdf2
+        run: pip install requests fpdf2 tweepy
 
       - name: Run the AI Money Machine
         env:
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GUMROAD_TOKEN: ${{ secrets.GUMROAD_TOKEN }}
+          TWITTER_API_KEY: ${{ secrets.TWITTER_API_KEY }}
+          TWITTER_API_KEY_SECRET: ${{ secrets.TWITTER_API_KEY_SECRET }}
+          TWITTER_ACCESS_TOKEN: ${{ secrets.TWITTER_ACCESS_TOKEN }}
+          TWITTER_ACCESS_TOKEN_SECRET: ${{ secrets.TWITTER_ACCESS_TOKEN_SECRET }}
+          HASKNODE_TOKEN: ${{ secrets.HASKNODE_TOKEN }}
+          HASKNODE_PUBLICATION_ID: ${{ secrets.HASKNODE_PUBLICATION_ID }}
+          PINTEREST_ACCESS_TOKEN: ${{ secrets.PINTEREST_ACCESS_TOKEN }}
         run: python main.py
