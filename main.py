@@ -22,8 +22,7 @@ HASKNODE_TOKEN = os.environ["HASKNODE_TOKEN"]
 HASKNODE_PUBLICATION_ID = os.environ["HASKNODE_PUBLICATION_ID"]
 PINTEREST_ACCESS_TOKEN = os.environ.get("PINTEREST_ACCESS_TOKEN", "")
 
-# ---------- GROQ (OPENAI-COMPATIBLE) ----------
-GROQ_MODEL = "llama3-8b-8192"
+# ---------- GROQ (WORKING CONFIGURATION) ----------
 GROQ_BASE_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 def llm_generate(prompt):
@@ -32,13 +31,15 @@ def llm_generate(prompt):
         "Content-Type": "application/json"
     }
     payload = {
-        "model": GROQ_MODEL,
+        "model": "llama-3.3-70b-versatile",
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.8,
-        "max_tokens": 2048
+        "max_completion_tokens": 2048
     }
     resp = requests.post(GROQ_BASE_URL, headers=headers, json=payload, timeout=60)
-    resp.raise_for_status()
+    if resp.status_code != 200:
+        logging.error(f"Groq error {resp.status_code}: {resp.text}")
+        resp.raise_for_status()
     result = resp.json()
     return result["choices"][0]["message"]["content"]
 
