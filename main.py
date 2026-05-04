@@ -22,8 +22,9 @@ HASKNODE_TOKEN = os.environ["HASKNODE_TOKEN"]
 HASKNODE_PUBLICATION_ID = os.environ["HASKNODE_PUBLICATION_ID"]
 PINTEREST_ACCESS_TOKEN = os.environ.get("PINTEREST_ACCESS_TOKEN", "")
 
-# ---------- GEMINI (FIXED URL) ----------
+# ---------- GEMINI (CORRECT URL + PARSING) ----------
 def gemini_generate(prompt):
+    # This is the CORRECT URL – one word, no spaces
     url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
     headers = {"Content-Type": "application/json"}
     data = {
@@ -34,6 +35,7 @@ def gemini_generate(prompt):
     resp.raise_for_status()
     result = resp.json()
     try:
+        # Correctly navigate the JSON structure
         return result["candidates"][0]["content"]["parts"][0]["text"]
     except (KeyError, IndexError):
         logging.error("Unexpected Gemini response: %s", json.dumps(result, indent=2))
