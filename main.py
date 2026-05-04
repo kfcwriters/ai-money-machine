@@ -2,6 +2,7 @@ import os
 import sys
 import json
 import logging
+import textwrap
 
 import requests
 import tweepy
@@ -22,7 +23,7 @@ HASKNODE_TOKEN = os.environ["HASKNODE_TOKEN"]
 HASKNODE_PUBLICATION_ID = os.environ["HASKNODE_PUBLICATION_ID"]
 PINTEREST_ACCESS_TOKEN = os.environ.get("PINTEREST_ACCESS_TOKEN", "")
 
-# ---------- GROQ (WORKING CONFIGURATION) ----------
+# ---------- GROQ ----------
 GROQ_BASE_URL = "https://api.groq.com/openai/v1/chat/completions"
 
 def llm_generate(prompt):
@@ -72,7 +73,7 @@ Title of eBook:
         ebook_title = "Ultimate Guide to " + problem_title
     return ebook_title, content
 
-# ---------- PDF ----------
+# ---------- PDF (with long line fix) ----------
 def create_pdf(title, content):
     pdf = FPDF()
     pdf.add_page()
@@ -81,10 +82,16 @@ def create_pdf(title, content):
     pdf.cell(0, 10, title, ln=True, align="C")
     pdf.ln(10)
     pdf.set_font("Helvetica", size=11)
-    for line in content.split("\n"):
-        line = line.strip()
+
+    effective_width = pdf.w - pdf.l_margin - pdf.r_margin  # usable width in mm
+    # effective_width is typically around 190, but we'll use it as character width estimate
+    max_chars_per_line = int(effective_width / 2)  # rough approximation
+
+    for raw_line in content.split("\n"):
+        line = raw_line.strip()
         if not line:
             continue
+
         if line.startswith("## "):
             pdf.set_font("Helvetica", "B", 13)
             pdf.cell(0, 8, line[3:], ln=True)
@@ -96,7 +103,19 @@ def create_pdf(title, content):
         elif line.startswith("- "):
             pdf.cell(0, 6, "  • " + line[2:], ln=True)
         else:
-            pdf.multi_cell(0, 6, line)
+            # If the line has no spaces and is extremely long, break it
+            if len(line) > max_chars_per_line and " " not in line:
+                parts = textwrap.wrap(line, width=max_chars_per_line)
+                for part in parts:
+                    pdf.cell(0, 6, part, ln=True)
+            else:
+                try:
+                    pdf.multi_cell(0, 6, line)
+                except Exception as e:
+                    logging.warning(f"PDF multi_cell failed for line: {line[:80]}... Error: {e}")
+                    # fallback: just write as-is with cell
+                    pdf.cell(0, 6, line, ln=True)
+
     filename = "product.pdf"
     pdf.output(filename)
     return filename
