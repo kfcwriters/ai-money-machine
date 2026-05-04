@@ -177,15 +177,14 @@ def publish_to_gumroad(ebook_title, pdf_path, problem_title):
 
     return short_url
 
-# ---------- HASKNODE (FIXED ENDPOINT) ----------
+# ---------- HASKNODE (UPDATED MUTATION) ----------
 def publish_hashnode_article(ebook_title, problem_title, gumroad_url):
+    # Updated mutation using CreateDraftInput (based on Hashnode's latest API)
     query = """
-    mutation CreateStory($input: CreateStoryInput!) {
-      createStory(input: $input) {
-        code
-        success
-        message
-        story {
+    mutation CreateDraft($input: CreateDraftInput!) {
+      createDraft(input: $input) {
+        draft {
+          id
           slug
         }
       }
@@ -201,17 +200,13 @@ def publish_hashnode_article(ebook_title, problem_title, gumroad_url):
             "contentMarkdown": blog_body,
             "publicationId": HASKNODE_PUBLICATION_ID,
             "tags": [],
-            "isHidden": False,
-            "isPartOfPublication": {
-                "publicationId": HASKNODE_PUBLICATION_ID
-            }
+            "isHidden": False
         }
     }
     headers = {
         "Authorization": HASKNODE_TOKEN,
         "Content-Type": "application/json"
     }
-    # Correct GraphQL endpoint
     response = requests.post(
         "https://gql.hashnode.com/",
         json={"query": query, "variables": variables},
@@ -219,18 +214,18 @@ def publish_hashnode_article(ebook_title, problem_title, gumroad_url):
         timeout=30
     )
     logging.info(f"Hashnode status: {response.status_code}")
-    if response.status_code != 200:
-        logging.error(f"Hashnode error: {response.text}")
-        response.raise_for_status()
-    data = response.json()
-    if "errors" in data:
-        logging.error("Hashnode GraphQL errors: %s", json.dumps(data["errors"]))
-    else:
-        slug = data.get("data", {}).get("createStory", {}).get("story", {}).get("slug", "")
-        if slug:
-            logging.info(f"Hashnode article published: {HASKNODE_PUBLICATION_ID}/{slug}")
+    if response.status_code == 200:
+        data = response.json()
+        if "errors" in data:
+            logging.error("Hashnode GraphQL errors: %s", json.dumps(data["errors"]))
         else:
-            logging.warning("Hashnode article created but no slug returned.")
+            slug = data.get("data", {}).get("createDraft", {}).get("draft", {}).get("slug", "")
+            if slug:
+                logging.info(f"Hashnode draft created: {HASKNODE_PUBLICATION_ID}/{slug}")
+            else:
+                logging.warning("Hashnode draft created but no slug returned.")
+    else:
+        logging.error(f"Hashnode request failed: {response.text}")
 
 # ---------- TWITTER ----------
 def send_tweet(ebook_title, gumroad_url):
@@ -247,37 +242,67 @@ def send_tweet(ebook_title, gumroad_url):
     except tweepy.TweepyException as e:
         logging.error(f"Tweet failed: {e}")
 
-# ---------- PINTEREST ----------
+# ---------- PINTEREST (skip) ----------
 def create_pin(gumroad_url, ebook_title):
     if not PINTEREST_ACCESS_TOKEN:
         logging.info("Pinterest token not set. Skipping pin.")
         return
     logging.info("Pinterest pin creation skipped (needs image).")
 
-# ---------- MAIN ----------
+# ---------- MAIN (ROBUST) ----------
 def main():
     logging.info("=== AI Money Machine Run Starting ===")
+    problem = None
+    ebook_title = None
+    gumroad_url = None
+
     try:
         problem = get_trending_problem()
         logging.info(f"Problem: {problem}")
+    except Exception as e:
+        logging.exception("Failed to get trending problem. Stopping.")
+        sys.exit(1)
 
+    try:
         ebook_title, ebook_md = generate_product(problem)
         logging.info(f"Product title: {ebook_title}")
+    except Exception as e:
+        logging.exception("Failed to generate product content.")
+        sys.exit(1)
 
+    try:
         pdf_path = create_pdf(ebook_title, ebook_md)
         logging.info("PDF generated.")
+    except Exception as e:
+        logging.exception("Failed to create PDF.")
+        sys.exit(1)
 
+    try:
         gumroad_url = publish_to_gumroad(ebook_title, pdf_path, problem)
         logging.info(f"Gumroad URL: {gumroad_url}")
-
-        publish_hashnode_article(ebook_title, problem, gumroad_url)
-        send_tweet(ebook_title, gumroad_url)
-        create_pin(gumroad_url, ebook_title)
-
-        logging.info("=== AI Money Machine Run Completed Successfully ===")
     except Exception as e:
-        logging.exception("Fatal error in automation run.")
+        logging.exception("Failed to publish to Gumroad.")
         sys.exit(1)
+
+    # Optional steps – failures are logged but don't crash the machine
+    try:
+        publish_hashnode_article(ebook_title, problem, gumroad_url)
+    except Exception as e:
+        logging.exception("Hashnode publishing failed, continuing anyway.")
+
+    try:
+        send_tweet(ebook_title, gumroad_url)
+    except Exception as e:
+        logging.exception("Tweet failed, continuing anyway.")
+
+    try:
+        create_pin(gumroad_url, ebook_title)
+    except Exception as e:
+        logging.exception("Pinterest failed, continuing anyway.")
+
+    logging.info("=== AI Money Machine Run Completed Successfully ===")
+    if gumroad_url:
+        logging.info(f"🌟 Your new product is live at: {gumroad_url}")
 
 if __name__ == "__main__":
     main()
