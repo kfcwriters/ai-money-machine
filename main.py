@@ -12,7 +12,7 @@ logging.basicConfig(level=logging.INFO, stream=sys.stdout,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 
 # ---------- API KEYS ----------
-GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
+GROQ_API_KEY = os.environ["GROQ_API_KEY"]
 GUMROAD_TOKEN = os.environ["GUMROAD_TOKEN"]
 TWITTER_API_KEY = os.environ["TWITTER_API_KEY"]
 TWITTER_API_KEY_SECRET = os.environ["TWITTER_API_KEY_SECRET"]
@@ -22,35 +22,36 @@ HASKNODE_TOKEN = os.environ["HASKNODE_TOKEN"]
 HASKNODE_PUBLICATION_ID = os.environ["HASKNODE_PUBLICATION_ID"]
 PINTEREST_ACCESS_TOKEN = os.environ.get("PINTEREST_ACCESS_TOKEN", "")
 
-# ---------- GEMINI (CORRECT URL + PARSING) ----------
-def gemini_generate(prompt):
-    # This is the CORRECT URL – one word, no spaces
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
-    headers = {"Content-Type": "application/json"}
-    data = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.8, "maxOutputTokens": 2048}
+# ---------- GROQ (OPENAI-COMPATIBLE) ----------
+GROQ_MODEL = "llama3-8b-8192"
+GROQ_BASE_URL = "https://api.groq.com/openai/v1/chat/completions"
+
+def llm_generate(prompt):
+    headers = {
+        "Authorization": f"Bearer {GROQ_API_KEY}",
+        "Content-Type": "application/json"
     }
-    resp = requests.post(url, headers=headers, json=data, timeout=30)
+    payload = {
+        "model": GROQ_MODEL,
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.8,
+        "max_tokens": 2048
+    }
+    resp = requests.post(GROQ_BASE_URL, headers=headers, json=payload, timeout=60)
     resp.raise_for_status()
     result = resp.json()
-    try:
-        # Correctly navigate the JSON structure
-        return result["candidates"][0]["content"]["parts"][0]["text"]
-    except (KeyError, IndexError):
-        logging.error("Unexpected Gemini response: %s", json.dumps(result, indent=2))
-        raise
+    return result["choices"][0]["message"]["content"]
 
-# ---------- TRENDING PROBLEM (no Reddit) ----------
+# ---------- TRENDING PROBLEM ----------
 def get_trending_problem():
     prompt = """You are a market researcher. Suggest ONE specific, popular problem people are actively searching for in the self-improvement, productivity, or side hustle space. It should be something that could be solved with a short $5 digital guide.
 Only return the problem title as a single sentence. Do not add any extra text.
 
 Example: "How to create a morning routine that actually sticks"
 """
-    problem = gemini_generate(prompt).strip()
+    problem = llm_generate(prompt).strip()
     problem = problem.strip('"').strip()
-    logging.info(f"Gemini trending problem: {problem}")
+    logging.info(f"AI trending problem: {problem}")
     return problem
 
 # ---------- PRODUCT CONTENT ----------
@@ -62,7 +63,7 @@ Problem: "{problem_title}"
 Title of eBook:
 (Now write the full eBook content below in Markdown)
 """
-    full_text = gemini_generate(prompt)
+    full_text = llm_generate(prompt)
     lines = full_text.strip().split("\n")
     ebook_title = lines[0].strip("#* ").strip()
     content = "\n".join(lines[1:]).strip()
@@ -139,7 +140,7 @@ def publish_hashnode_article(ebook_title, problem_title, gumroad_url):
     }
     """
     blog_prompt = f"""Write a helpful 300‑word blog article about solving this problem: "{problem_title}". At the end, naturally recommend a $4.99 guide that solves it, with a link placeholder [GUIDE_LINK]. Use a friendly tone."""
-    blog_body = gemini_generate(blog_prompt)
+    blog_body = llm_generate(blog_prompt)
     blog_body = blog_body.replace("[GUIDE_LINK]", gumroad_url)
 
     variables = {
