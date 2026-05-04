@@ -97,7 +97,7 @@ def sanitize_text(text):
             cleaned.append('?')
     return ''.join(cleaned)
 
-# ---------- PDF (Unicode-safe) ----------
+# ---------- PDF ----------
 def create_pdf(title, content):
     pdf = FPDF()
     pdf.add_page()
@@ -145,12 +145,11 @@ def create_pdf(title, content):
     pdf.output(filename)
     return filename
 
-# ---------- GUMROAD (SINGLE-STEP UPLOAD) ----------
+# ---------- GUMROAD (WITH FULL LOGGING) ----------
 def publish_to_gumroad(ebook_title, pdf_path, problem_title):
     url = "https://api.gumroad.com/v2/products"
     headers = {"Authorization": f"Bearer {GUMROAD_TOKEN}"}
 
-    # Create the product with the file in one request (multipart/form-data)
     fields = {
         "name": sanitize_text(ebook_title),
         "description": f"This powerful guide solves: **{sanitize_text(problem_title)}**. Instant download – your action plan inside.",
@@ -161,12 +160,29 @@ def publish_to_gumroad(ebook_title, pdf_path, problem_title):
         files = {"file": ("product.pdf", f, "application/pdf")}
         resp = requests.post(url, headers=headers, data=fields, files=files, timeout=60)
 
+    logging.info(f"Gumroad status code: {resp.status_code}")
+    logging.info(f"Gumroad response: {resp.text}")
+
     if resp.status_code != 200:
-        logging.error(f"Gumroad creation failed: {resp.status_code} - {resp.text}")
+        logging.error("Gumroad creation failed.")
         resp.raise_for_status()
 
-    product_info = resp.json()["product"]
-    short_url = product_info.get("short_url", "no-url")
+    resp_json = resp.json()
+
+    # Try to extract product URL from different possible response structures
+    if "product" in resp_json:
+        product_data = resp_json["product"]
+        short_url = product_data.get("short_url", "no-url")
+    elif "short_url" in resp_json:
+        short_url = resp_json["short_url"]
+    elif "id" in resp_json:
+        # Manually construct the Gumroad product URL (typical pattern)
+        product_id = resp_json["id"]
+        short_url = f"https://gumroad.com/l/{product_id}"
+    else:
+        logging.error(f"Unexpected Gumroad response structure: {resp_json}")
+        raise KeyError("Could not find product URL in Gumroad response")
+
     logging.info(f"Gumroad product created: {short_url}")
     return short_url
 
