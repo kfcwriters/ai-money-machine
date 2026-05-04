@@ -144,7 +144,7 @@ def create_pdf(title, content):
     pdf.output(filename)
     return filename
 
-# ---------- GUMROAD (published as lowercase "true" string) ----------
+# ---------- GUMROAD ----------
 def publish_to_gumroad(ebook_title, pdf_path, problem_title):
     headers = {"Authorization": f"Bearer {GUMROAD_TOKEN}"}
 
@@ -153,7 +153,7 @@ def publish_to_gumroad(ebook_title, pdf_path, problem_title):
         "name": sanitize_text(ebook_title),
         "description": f"This powerful guide solves: **{sanitize_text(problem_title)}**. Instant download – your action plan inside.",
         "price": "499",
-        "published": "true",   # <-- lowercase string, works with form data
+        "published": True,
     }
     resp1 = requests.post(create_url, headers=headers, data=product_data, timeout=30)
     if resp1.status_code != 200 or not resp1.json().get("success"):
@@ -194,10 +194,11 @@ def get_hasnode_publication_id():
             logging.info(f"Resolved publication ID: {pub_id}")
             return pub_id
     logging.error("Could not fetch publication ID. Using host as fallback.")
-    return HASKNODE_PUBLICATION_HOST
+    return HASKNODE_PUBLICATION_HOST  # fallback (will likely fail)
 
-# ---------- HASKNODE (publish live) ----------
+# ---------- HASKNODE (publish live, with correct ID) ----------
 def publish_hashnode_article(ebook_title, problem_title, gumroad_url):
+    # Get the real ObjectId
     publication_id = get_hasnode_publication_id()
 
     query = """
