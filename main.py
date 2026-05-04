@@ -96,7 +96,7 @@ def sanitize_text(text):
             cleaned.append('?')
     return ''.join(cleaned)
 
-# ---------- PDF (Unicode-safe) ----------
+# ---------- PDF ----------
 def create_pdf(title, content):
     pdf = FPDF()
     pdf.add_page()
@@ -144,11 +144,11 @@ def create_pdf(title, content):
     pdf.output(filename)
     return filename
 
-# ---------- GUMROAD (TWO-STEP UPLOAD) ----------
+# ---------- GUMROAD ----------
 def publish_to_gumroad(ebook_title, pdf_path, problem_title):
     headers = {"Authorization": f"Bearer {GUMROAD_TOKEN}"}
 
-    # Step 1: Create product without file
+    # Step 1: Create product
     create_url = "https://api.gumroad.com/v2/products"
     product_data = {
         "name": sanitize_text(ebook_title),
@@ -157,39 +157,27 @@ def publish_to_gumroad(ebook_title, pdf_path, problem_title):
         "published": "true",
     }
     resp1 = requests.post(create_url, headers=headers, data=product_data, timeout=30)
-    logging.info(f"Gumroad create status: {resp1.status_code}")
-    logging.debug(f"Gumroad create response: {resp1.text}")
-
-    if resp1.status_code != 200:
+    if resp1.status_code != 200 or not resp1.json().get("success"):
         logging.error(f"Gumroad product creation failed: {resp1.text}")
         resp1.raise_for_status()
-
-    create_json = resp1.json()
-    if not create_json.get("success", False):
-        logging.error(f"Gumroad product creation not successful: {create_json}")
-        raise Exception(f"Gumroad product creation failed: {create_json.get('message')}")
-
-    product_info = create_json["product"]
+    product_info = resp1.json()["product"]
     product_id = product_info["id"]
     short_url = product_info.get("short_url", "no-url")
-    logging.info(f"Gumroad product created (ID: {product_id}), short URL: {short_url}")
+    logging.info(f"Gumroad product created: {short_url}")
 
-    # Step 2: Upload the file to the product
+    # Step 2: Upload file
     upload_url = f"https://api.gumroad.com/v2/products/{product_id}/variant_files"
     with open(pdf_path, "rb") as f:
         files = {"file": ("product.pdf", f, "application/pdf")}
         resp2 = requests.post(upload_url, headers=headers, files=files, timeout=60)
-    logging.info(f"Gumroad file upload status: {resp2.status_code}")
     if resp2.status_code != 200:
-        logging.error(f"Gumroad file upload failed: {resp2.text}")
-        # Even if file upload fails, we still return the product URL
-        # The product will exist but without a file (you can manually add it if needed)
+        logging.warning(f"File upload failed: {resp2.text}")
     else:
         logging.info("File uploaded successfully.")
 
     return short_url
 
-# ---------- HASKNODE ----------
+# ---------- HASKNODE (FIXED ENDPOINT) ----------
 def publish_hashnode_article(ebook_title, problem_title, gumroad_url):
     query = """
     mutation CreateStory($input: CreateStoryInput!) {
@@ -223,15 +211,26 @@ def publish_hashnode_article(ebook_title, problem_title, gumroad_url):
         "Authorization": HASKNODE_TOKEN,
         "Content-Type": "application/json"
     }
-    resp = requests.post("https://api.hashnode.com/", json={"query": query, "variables": variables}, headers=headers, timeout=30)
-    resp.raise_for_status()
-    data = resp.json()
+    # Correct GraphQL endpoint
+    response = requests.post(
+        "https://gql.hashnode.com/",
+        json={"query": query, "variables": variables},
+        headers=headers,
+        timeout=30
+    )
+    logging.info(f"Hashnode status: {response.status_code}")
+    if response.status_code != 200:
+        logging.error(f"Hashnode error: {response.text}")
+        response.raise_for_status()
+    data = response.json()
     if "errors" in data:
-        logging.error("Hashnode error: %s", json.dumps(data["errors"]))
+        logging.error("Hashnode GraphQL errors: %s", json.dumps(data["errors"]))
     else:
         slug = data.get("data", {}).get("createStory", {}).get("story", {}).get("slug", "")
         if slug:
             logging.info(f"Hashnode article published: {HASKNODE_PUBLICATION_ID}/{slug}")
+        else:
+            logging.warning("Hashnode article created but no slug returned.")
 
 # ---------- TWITTER ----------
 def send_tweet(ebook_title, gumroad_url):
