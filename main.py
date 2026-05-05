@@ -5,32 +5,32 @@ from fpdf import FPDF
 logging.basicConfig(level=logging.INFO, stream=sys.stdout, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # ---------- API KEYS ----------
-GROQ_API_KEY = os.environ["GROQ_API_KEY"]
-GUMROAD_TOKEN = os.environ["GUMROAD_TOKEN"]
-TWITTER_API_KEY = os.environ["TWITTER_API_KEY"]
-TWITTER_API_KEY_SECRET = os.environ["TWITTER_API_KEY_SECRET"]
-TWITTER_ACCESS_TOKEN = os.environ["TWITTER_ACCESS_TOKEN"]
+GROQ_API_KEY   = os.environ["GROQ_API_KEY"]
+GUMROAD_TOKEN  = os.environ["GUMROAD_TOKEN"]
+TWITTER_API_KEY       = os.environ["TWITTER_API_KEY"]
+TWITTER_API_KEY_SECRET= os.environ["TWITTER_API_KEY_SECRET"]
+TWITTER_ACCESS_TOKEN  = os.environ["TWITTER_ACCESS_TOKEN"]
 TWITTER_ACCESS_TOKEN_SECRET = os.environ["TWITTER_ACCESS_TOKEN_SECRET"]
-HASKNODE_TOKEN = os.environ["HASKNODE_TOKEN"]
+HASKNODE_TOKEN        = os.environ["HASKNODE_TOKEN"]
 HASKNODE_PUBLICATION_HOST = os.environ["HASKNODE_PUBLICATION_ID"]   # the domain
 PINTEREST_ACCESS_TOKEN = os.environ.get("PINTEREST_ACCESS_TOKEN", "")
 
 # ---------- GROQ ----------
-GROQ_BASE_URL = "https://api.groq.com/openai/v1/chat/completions"
+GROQ_BASE = "https://api.groq.com/openai/v1/chat/completions"
 
 def llm_generate(prompt):
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
-    payload = {"model": "llama-3.3-70b-versatile", "messages": [{"role": "user", "content": prompt}], "temperature": 0.8, "max_completion_tokens": 2048}
-    resp = requests.post(GROQ_BASE_URL, headers=headers, json=payload, timeout=60)
+    payload = {"model": "llama-3.3-70b-versatile", "messages": [{"role":"user","content":prompt}], "temperature":0.8, "max_completion_tokens":2048}
+    resp = requests.post(GROQ_BASE, headers=headers, json=payload, timeout=60)
     resp.raise_for_status()
     return resp.json()["choices"][0]["message"]["content"]
 
-# ---------- TRENDING PROBLEM ----------
+# ---------- TRENDING ----------
 def get_trending_problem():
     prompt = "You are a market researcher. Suggest ONE specific, popular problem people are actively searching for in the self-improvement, productivity, or side hustle space. It should be something that could be solved with a short $5 digital guide. Only return the problem title as a single sentence. Example: \"How to create a morning routine that actually sticks\""
     return llm_generate(prompt).strip().strip('"')
 
-# ---------- PRODUCT CONTENT ----------
+# ---------- CONTENT ----------
 def generate_product(problem_title):
     prompt = f"You are a top digital product creator. Based on the problem below, write a high-value, actionable eBook (about 500 words) that solves it. Write in Markdown format. Include a catchy title, introduction, 5 practical steps, and a summary checklist.\n\nProblem: \"{problem_title}\"\n\nTitle of eBook:\n(Write the full eBook content below in Markdown)"
     full_text = llm_generate(prompt)
@@ -46,29 +46,19 @@ def sanitize_text(text):
         text = text.replace(orig, new)
     return ''.join(ch if ord(ch) < 128 or ch == '\n' else '?' for ch in text)
 
-# ---------- PDF (TEXTWRAP ONLY – NO MORE MULTI_CELL) ----------
+# ---------- PDF (textwrap only) ----------
 def create_pdf(title, content):
     pdf = FPDF()
-    pdf.add_page()
-    pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page(); pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_font("DejaVu", "", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", uni=True)
     pdf.add_font("DejaVu", "B", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", uni=True)
-
-    # Title
     pdf.set_font("DejaVu", "B", 16)
     pdf.cell(0, 10, sanitize_text(title), new_x="LMARGIN", new_y="NEXT", align="C")
     pdf.ln(10)
-
-    # Safe character count per line (tested with DejaVu size 11)
     max_chars = 90
-
-    # Process each line of the raw Markdown content
     for raw_line in content.split("\n"):
         line = sanitize_text(raw_line).strip()
-        if not line:
-            continue
-
-        # Determine font & size based on Markdown prefix
+        if not line: continue
         if line.startswith("## "):
             pdf.set_font("DejaVu", "B", 13)
             print_line = line[3:]
@@ -81,28 +71,34 @@ def create_pdf(title, content):
         else:
             pdf.set_font("DejaVu", size=11)
             print_line = line
-
-        # Break any long lines using textwrap (handles both spaced and unspaced text)
-        wrapped = textwrap.wrap(print_line, width=max_chars)
-        if not wrapped:   # textwrap returns empty list for completely empty string
-            wrapped = [""]
-
-        for chunk in wrapped:
+        for chunk in textwrap.wrap(print_line, width=max_chars):
             pdf.cell(0, 6, chunk, new_x="LMARGIN", new_y="NEXT")
-
     pdf.output("product.pdf")
     return "product.pdf"
 
-# ---------- GUMROAD ----------
+# ---------- GUMROAD (with proper error check) ----------
 def publish_to_gumroad(ebook_title, pdf_path, problem_title):
     headers = {"Authorization": f"Bearer {GUMROAD_TOKEN}"}
-    data = {"name": sanitize_text(ebook_title), "description": f"This powerful guide solves: **{sanitize_text(problem_title)}**. Instant download.", "price": "499", "published": "true"}
+    data = {"name": sanitize_text(ebook_title),
+            "description": f"This powerful guide solves: **{sanitize_text(problem_title)}**. Instant download.",
+            "price": "499", "published": "true"}
     resp = requests.post("https://api.gumroad.com/v2/products", headers=headers, data=data, timeout=30)
-    if resp.status_code != 200 or not resp.json().get("success"):
-        logging.error(f"Gumroad product creation failed: {resp.text}")
+
+    # ---------- NEW SAFETY CHECK ----------
+    if resp.status_code != 200:
+        logging.error(f"Gumroad HTTP {resp.status_code}: {resp.text}")
         resp.raise_for_status()
-    product_id = resp.json()["product"]["id"]
-    short_url = resp.json()["product"].get("short_url", "no-url")
+    resp_json = resp.json()
+    if not resp_json.get("success"):
+        msg = resp_json.get("message", "Unknown error")
+        logging.error(f"Gumroad product creation failed: {msg}")
+        raise Exception(f"Gumroad API error: {msg}")
+    # ------------------------------------
+
+    product_id = resp_json["product"]["id"]
+    short_url = resp_json["product"].get("short_url", "no-url")
+    logging.info(f"Gumroad product created: {short_url}")
+
     # Upload file
     upload_url = f"https://api.gumroad.com/v2/products/{product_id}/variant_files"
     with open(pdf_path, "rb") as f:
@@ -114,21 +110,19 @@ def publish_to_gumroad(ebook_title, pdf_path, problem_title):
         logging.info("File uploaded successfully.")
     return short_url
 
-# ---------- HASKNODE (Guaranteed Publish) ----------
+# ---------- HASKNODE ----------
 CACHED_PUB_ID = None
 
 def get_hasnode_publication_id():
     global CACHED_PUB_ID
-    if CACHED_PUB_ID:
-        return CACHED_PUB_ID
+    if CACHED_PUB_ID: return CACHED_PUB_ID
     query = """query($host: String!) { publication(host: $host) { id } }"""
     variables = {"host": HASKNODE_PUBLICATION_HOST}
     headers = {"Authorization": HASKNODE_TOKEN, "Content-Type": "application/json"}
     resp = requests.post("https://gql.hashnode.com/", json={"query": query, "variables": variables}, headers=headers, timeout=30)
     if resp.status_code == 200:
-        pub_id = resp.json()["data"]["publication"]["id"]
-        CACHED_PUB_ID = pub_id
-        return pub_id
+        CACHED_PUB_ID = resp.json()["data"]["publication"]["id"]
+        return CACHED_PUB_ID
     raise Exception("Could not fetch publication ID")
 
 def publish_hashnode_article(ebook_title, problem_title, gumroad_url):
@@ -149,18 +143,17 @@ def publish_hashnode_article(ebook_title, problem_title, gumroad_url):
     else:
         logging.error(f"Hashnode request failed: {resp.text}")
 
-# ---------- TWITTER / PINTEREST (graceful) ----------
+# ---------- TWITTER / PINTEREST ----------
 def send_tweet(title, url):
     try:
-        client = tweepy.Client(consumer_key=TWITTER_API_KEY, consumer_secret=TWITTER_API_KEY_SECRET, access_token=TWITTER_ACCESS_TOKEN, access_token_secret=TWITTER_ACCESS_TOKEN_SECRET)
+        client = tweepy.Client(consumer_key=TWITTER_API_KEY, consumer_secret=TWITTER_API_KEY_SECRET,
+                               access_token=TWITTER_ACCESS_TOKEN, access_token_secret=TWITTER_ACCESS_TOKEN_SECRET)
         client.create_tweet(text=f"💡 {title}\n\nInstant $4.99 guide → {url}")
         logging.info("Tweet sent.")
-    except Exception as e:
-        logging.exception("Tweet failed")
+    except Exception as e: logging.exception("Tweet failed")
 
 def create_pin(url, title):
-    if not PINTEREST_ACCESS_TOKEN:
-        return
+    if not PINTEREST_ACCESS_TOKEN: return
     logging.info("Pinterest pin skipped (image needed).")
 
 # ---------- MAIN ----------
