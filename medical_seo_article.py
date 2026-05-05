@@ -80,6 +80,7 @@ variables = {"input": {
     "title": title,
     "contentMarkdown": full_body,
     "publicationId": pub_id,
+    "shouldSubmit": True,
     "tags": [
         {"slug": "medical-writing", "name": "Medical Writing"},
         {"slug": "thesis", "name": "Thesis"},
