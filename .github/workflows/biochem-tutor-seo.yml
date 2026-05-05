@@ -2,7 +2,7 @@ name: Daily Biochemistry SEO Article
 
 on:
   schedule:
-    - cron: '0 20 * * *'   # Daily 20:00 UTC
+    - cron: '0 18 * * *'   # Daily 18:00 UTC
   workflow_dispatch:
 
 jobs:
