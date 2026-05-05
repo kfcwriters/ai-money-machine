@@ -1,4 +1,4 @@
-import os, requests, logging, sys, feedparser, re
+import os, requests, logging, sys, json
 
 logging.basicConfig(level=logging.INFO, stream=sys.stdout,
                     format='%(asctime)s - %(levelname)s - %(message)s')
@@ -9,20 +9,45 @@ GROQ_API_KEY = os.environ["GROQ_API_KEY"]
 HIRE_ME_URL = os.environ["HIRE_ME_URL"]
 
 def get_latest_article():
-    rss_url = f"https://{HASKNODE_HOST}/rss.xml"
-    feed = feedparser.parse(rss_url)
-    if feed.entries:
-        entry = feed.entries[0]
-        title = entry.title
-        link = entry.link
-        content = re.sub(r'<[^>]+>', '', entry.get("summary", ""))
-        return title, content, link
-    return None, None, None
+    query = """
+    query($host: String!) {
+      publication(host: $host) {
+        posts(first: 1) {
+          edges {
+            node {
+              title
+              slug
+              content {
+                markdown
+              }
+            }
+          }
+        }
+      }
+    }
+    """
+    variables = {"host": HASKNODE_HOST}
+    resp = requests.post("https://gql.hashnode.com/", json={"query": query, "variables": variables}, timeout=30)
+    if resp.status_code != 200:
+        logging.error(f"Hashnode API error: {resp.status_code}")
+        return None, None, None
+
+    data = resp.json()
+    posts = data.get("data", {}).get("publication", {}).get("posts", {}).get("edges", [])
+    if not posts:
+        return None, None, None
+
+    post = posts[0]["node"]
+    title = post["title"]
+    slug = post["slug"]
+    content = post["content"]["markdown"]
+    link = f"https://{HASKNODE_HOST}/{slug}"
+    return title, content, link
 
 def generate_intro(title):
     prompt = f"""Write a 1‑sentence compelling intro for a Dev.to article titled "{title}" about biochemistry tutoring. Keep it under 100 characters."""
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
-    payload = {"model": "llama-3.3-70b-versatile", "messages": [{"role": "user", "content": prompt}], "temperature": 0.7, "max_completion_tokens": 100}
+    payload = {"model": "llama-3.3-70b-versatile", "messages": [{"role":"user","content":prompt}], "temperature":0.7, "max_completion_tokens":100}
     resp = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload, timeout=30)
     if resp.status_code == 200:
         return resp.json()["choices"][0]["message"]["content"].strip()
@@ -31,7 +56,7 @@ def generate_intro(title):
 def main():
     title, content, link = get_latest_article()
     if not title:
-        logging.error("No article found on BioChemTutor Hashnode.")
+        logging.error("No published posts found on BioChemTutor Hashnode. Ensure the SEO article ran first.")
         sys.exit(1)
 
     intro = generate_intro(title)
