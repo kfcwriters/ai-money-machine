@@ -55,8 +55,12 @@ if not pub_id:
     headers = {"Authorization": HASKNODE_TOKEN, "Content-Type": "application/json"}
     resp = requests.post("https://gql.hashnode.com/", json={"query": query, "variables": variables}, headers=headers)
     if resp.status_code == 200:
-        pub_id = resp.json()["data"]["publication"]["id"]
-        with open(cache_file, "w") as f: f.write(pub_id)
+        data = resp.json()
+        if data.get("data", {}).get("publication"):
+            pub_id = data["data"]["publication"]["id"]
+            with open(cache_file, "w") as f: f.write(pub_id)
+        else:
+            raise Exception(f"Publication not found for host {HASKNODE_HOST}. Check the domain and token.")
 if not pub_id:
     raise Exception("Cannot get publication ID")
 
@@ -65,7 +69,11 @@ variables = {"input": {
     "title": title,
     "contentMarkdown": full_body,
     "publicationId": pub_id,
-    "tags": [{"slug": "nutrition"}, {"slug": "diet"}, {"slug": "health"}]
+    "tags": [
+        {"slug": "nutrition", "name": "Nutrition"},
+        {"slug": "diet", "name": "Diet"},
+        {"slug": "health", "name": "Health"}
+    ]
 }}
 headers = {"Authorization": HASKNODE_TOKEN, "Content-Type": "application/json"}
 resp = requests.post("https://gql.hashnode.com/", json={"query": mutation, "variables": variables}, headers=headers)
