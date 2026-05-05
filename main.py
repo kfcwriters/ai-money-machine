@@ -14,6 +14,7 @@ TWITTER_ACCESS_TOKEN_SECRET = os.environ["TWITTER_ACCESS_TOKEN_SECRET"]
 HASKNODE_TOKEN        = os.environ["HASKNODE_TOKEN"]
 HASKNODE_PUBLICATION_HOST = os.environ["HASKNODE_PUBLICATION_ID"]   # the domain
 PINTEREST_ACCESS_TOKEN = os.environ.get("PINTEREST_ACCESS_TOKEN", "")
+HIRE_ME_URL           = os.environ.get("HIRE_ME_URL", "")            # optional service CTA
 
 # ---------- GROQ ----------
 GROQ_BASE = "https://api.groq.com/openai/v1/chat/completions"
@@ -76,7 +77,7 @@ def create_pdf(title, content):
     pdf.output("product.pdf")
     return "product.pdf"
 
-# ---------- GUMROAD (with proper error check) ----------
+# ---------- GUMROAD (with error check) ----------
 def publish_to_gumroad(ebook_title, pdf_path, problem_title):
     headers = {"Authorization": f"Bearer {GUMROAD_TOKEN}"}
     data = {"name": sanitize_text(ebook_title),
@@ -84,7 +85,6 @@ def publish_to_gumroad(ebook_title, pdf_path, problem_title):
             "price": "499", "published": "true"}
     resp = requests.post("https://api.gumroad.com/v2/products", headers=headers, data=data, timeout=30)
 
-    # ---------- NEW SAFETY CHECK ----------
     if resp.status_code != 200:
         logging.error(f"Gumroad HTTP {resp.status_code}: {resp.text}")
         resp.raise_for_status()
@@ -93,13 +93,11 @@ def publish_to_gumroad(ebook_title, pdf_path, problem_title):
         msg = resp_json.get("message", "Unknown error")
         logging.error(f"Gumroad product creation failed: {msg}")
         raise Exception(f"Gumroad API error: {msg}")
-    # ------------------------------------
 
     product_id = resp_json["product"]["id"]
     short_url = resp_json["product"].get("short_url", "no-url")
     logging.info(f"Gumroad product created: {short_url}")
 
-    # Upload file
     upload_url = f"https://api.gumroad.com/v2/products/{product_id}/variant_files"
     with open(pdf_path, "rb") as f:
         files = {"file": ("product.pdf", f, "application/pdf")}
@@ -110,7 +108,7 @@ def publish_to_gumroad(ebook_title, pdf_path, problem_title):
         logging.info("File uploaded successfully.")
     return short_url
 
-# ---------- HASKNODE ----------
+# ---------- HASKNODE (with optional service CTA) ----------
 CACHED_PUB_ID = None
 
 def get_hasnode_publication_id():
@@ -127,8 +125,15 @@ def get_hasnode_publication_id():
 
 def publish_hashnode_article(ebook_title, problem_title, gumroad_url):
     publication_id = get_hasnode_publication_id()
-    blog_prompt = f"Write a helpful 300‑word blog article about: \"{problem_title}\". End with: 'Get the full $4.99 guide here: [GUIDE_LINK]'. Use friendly tone."
+
+    # If HIRE_ME_URL is available, add a soft service CTA to the blog post
+    service_cta = ""
+    if HIRE_ME_URL:
+        service_cta = f" Need professional medical writing help? Visit {HIRE_ME_URL}."
+    blog_prompt = f"""Write a helpful 300‑word blog article about: "{problem_title}". End with: 'Get the full $4.99 guide here: [GUIDE_LINK].'{service_cta} Use friendly tone."""
+
     blog_body = llm_generate(blog_prompt).replace("[GUIDE_LINK]", gumroad_url)
+
     query = """mutation PublishPost($input: PublishPostInput!) { publishPost(input: $input) { post { slug, url } } }"""
     variables = {"input": {"title": f"How to {sanitize_text(ebook_title)}", "contentMarkdown": blog_body, "publicationId": publication_id, "tags": []}}
     headers = {"Authorization": HASKNODE_TOKEN, "Content-Type": "application/json"}
