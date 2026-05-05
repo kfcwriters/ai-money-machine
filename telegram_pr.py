@@ -9,7 +9,7 @@ BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 CHAT_ID = os.environ["TELEGRAM_CHANNEL_ID"]   # @username or numeric ID
 
 def generate_press_release():
-    prompt = f"""Write a professional 250-word press release about a medical writing service that helps researchers with manuscripts, case reports, and journal submission. The service is at {HIRE_ME_URL}. Include a headline, body, and contact info. Use a formal news style."""
+    prompt = f"""Write a 250‑word press release about a comprehensive medical and academic writing service that covers: thesis synopsis planning, complete thesis writing, manuscript/article writing, journal formatting, and publication support. The service is available at {HIRE_ME_URL}. Include a quote about helping researchers from idea to publication, and end with contact information."""
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
     payload = {
         "model": "llama-3.3-70b-versatile",
