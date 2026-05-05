@@ -1,0 +1,24 @@
+name: Discord Product Announcer
+
+on:
+  schedule:
+    - cron: '15 8 * * *'   # 08:15 UTC daily (15 min after product machine)
+  workflow_dispatch:         # Manual trigger for testing
+
+jobs:
+  announce:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install libraries
+        run: pip install requests
+      - name: Announce to Discord
+        env:
+          GUMROAD_TOKEN: ${{ secrets.GUMROAD_TOKEN }}
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        run: python discord_announce.py
