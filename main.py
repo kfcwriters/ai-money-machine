@@ -46,25 +46,51 @@ def sanitize_text(text):
         text = text.replace(orig, new)
     return ''.join(ch if ord(ch) < 128 or ch == '\n' else '?' for ch in text)
 
-# ---------- PDF ----------
+# ---------- PDF (FIXED LONG LINE BREAK) ----------
 def create_pdf(title, content):
     pdf = FPDF()
-    pdf.add_page(); pdf.set_auto_page_break(auto=True, margin=15)
+    pdf.add_page()
+    pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_font("DejaVu", "", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", uni=True)
     pdf.add_font("DejaVu", "B", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", uni=True)
+
+    # Title
     pdf.set_font("DejaVu", "B", 16)
-    pdf.cell(0, 10, sanitize_text(title), ln=True, align="C"); pdf.ln(10)
+    pdf.cell(0, 10, sanitize_text(title), new_x="LMARGIN", new_y="NEXT", align="C")
+    pdf.ln(10)
     pdf.set_font("DejaVu", size=11)
+
+    effective_width = pdf.epw  # usable page width in mm after margins
+    max_chars_per_line = int(effective_width / 2)   # rough estimate
+
     for raw_line in content.split("\n"):
         line = sanitize_text(raw_line).strip()
-        if not line: continue
-        if line.startswith("## "): pdf.set_font("DejaVu", "B", 13); pdf.cell(0, 8, line[3:], ln=True); pdf.set_font("DejaVu", size=11)
-        elif line.startswith("# "): pdf.set_font("DejaVu", "B", 15); pdf.cell(0, 8, line[2:], ln=True); pdf.set_font("DejaVu", size=11)
-        elif line.startswith("- "): pdf.cell(0, 6, "  - " + line[2:], ln=True)
+        if not line:
+            continue
+
+        if line.startswith("## "):
+            pdf.set_font("DejaVu", "B", 13)
+            pdf.cell(0, 8, line[3:], new_x="LMARGIN", new_y="NEXT")
+            pdf.set_font("DejaVu", size=11)
+        elif line.startswith("# "):
+            pdf.set_font("DejaVu", "B", 15)
+            pdf.cell(0, 8, line[2:], new_x="LMARGIN", new_y="NEXT")
+            pdf.set_font("DejaVu", size=11)
+        elif line.startswith("- "):
+            pdf.set_font("DejaVu", size=11)
+            pdf.cell(0, 6, "  - " + line[2:], new_x="LMARGIN", new_y="NEXT")
         else:
-            if len(line) > 90 and " " not in line:
-                for part in textwrap.wrap(line, width=90): pdf.cell(0, 6, part, ln=True)
-            else: pdf.multi_cell(0, 6, line)
+            pdf.set_font("DejaVu", size=11)
+            # If the line is too long and contains no spaces, break it forcefully
+            if len(line) > max_chars_per_line and " " not in line:
+                # Forcefully break into chunks
+                for i in range(0, len(line), max_chars_per_line):
+                    chunk = line[i:i+max_chars_per_line]
+                    pdf.cell(0, 6, chunk, new_x="LMARGIN", new_y="NEXT")
+            else:
+                # Normal multi_cell which wraps at spaces
+                pdf.multi_cell(0, 6, line, align="L")
+
     pdf.output("product.pdf")
     return "product.pdf"
 
