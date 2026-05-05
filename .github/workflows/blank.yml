@@ -6,20 +6,17 @@ on:
   workflow_dispatch:
 
 jobs:
-  run-script:
+  create-product:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
       - name: Install libraries
         run: pip install requests fpdf2 tweepy
-
       - name: Run the AI Money Machine
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
@@ -32,3 +29,21 @@ jobs:
           HASKNODE_PUBLICATION_ID: ${{ secrets.HASKNODE_PUBLICATION_ID }}
           PINTEREST_ACCESS_TOKEN: ${{ secrets.PINTEREST_ACCESS_TOKEN }}
         run: python main.py
+
+  announce:
+    needs: create-product
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install libraries
+        run: pip install requests
+      - name: Announce to Discord
+        env:
+          GUMROAD_TOKEN: ${{ secrets.GUMROAD_TOKEN }}
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+        run: python discord_announce.py
