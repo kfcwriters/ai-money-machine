@@ -1,0 +1,26 @@
+name: Daily Nutrition SEO Article
+
+on:
+  schedule:
+    - cron: '0 18 * * *'   # Daily 18:00 UTC
+  workflow_dispatch:
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install libraries
+        run: pip install requests
+      - name: Publish article
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          HASKNODE_TOKEN: ${{ secrets.HASKNODE_TOKEN_NUTRITION }}
+          HASKNODE_PUBLICATION_ID: ${{ secrets.HASKNODE_PUBLICATION_ID_NUTRITION }}
+          HIRE_ME_URL: ${{ secrets.HIRE_ME_URL_NUTRITION }}
+        run: python nutrition_seo_article.py
