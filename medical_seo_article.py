@@ -8,11 +8,19 @@ HASKNODE_TOKEN = os.environ["HASKNODE_TOKEN"]
 HASKNODE_HOST = os.environ["HASKNODE_PUBLICATION_ID"]
 HIRE_ME_URL = os.environ["HIRE_ME_URL"]
 
-# ---------- BROAD KEYWORD POOL (all services) ----------
 KEYWORDS = [
+    "hire a medical writer for manuscript editing",
+    "case report writing service for doctors",
+    "medical literature review writer for hire",
+    "professional medical writing services for pharma",
+    "help with journal submission and formatting",
+    "medical editor needed for clinical research",
+    "freelance medical writer for hire",
+    "manuscript editing and proofreading service",
+    "medical writing help for busy clinicians",
+    "expert medical writer for case reports",
     "thesis synopsis planning service",
     "complete thesis writing help",
-    "medical manuscript writing service",
     "research article writing for journals",
     "journal submission and formatting support",
     "literature review writing for PhD",
@@ -38,7 +46,6 @@ keyword = random.choice(KEYWORDS)
 title_prompt = f"Generate a catchy, SEO-optimized blog title targeting the keyword '{keyword}'. The title should appeal to researchers, PhD students, or doctors. Return only the title."
 title = llm_generate(title_prompt).strip().strip('"')
 
-# Intro that speaks to all services
 body_intro = (
     "Need help with your medical thesis, manuscript, or journal submission? "
     "I provide end‑to‑end medical writing services—from synopsis planning and complete thesis writing to article preparation and publication support. "
@@ -49,7 +56,6 @@ body_prompt = f"""Write a 500‑word blog article with the title "{title}". Star
 body = llm_generate(body_prompt)
 full_body = body_intro + body
 
-# Publication ID (cached)
 cache_file = ".pubid"
 pub_id = None
 if os.path.exists(cache_file):
@@ -66,7 +72,12 @@ if not pub_id:
     raise Exception("Cannot get publication ID")
 
 mutation = """mutation PublishPost($input: PublishPostInput!) { publishPost(input: $input) { post { slug, url } } }"""
-variables = {"input": {"title": title, "contentMarkdown": full_body, "publicationId": pub_id, "tags": ["medical writing", "thesis", "research"]}}
+variables = {"input": {
+    "title": title,
+    "contentMarkdown": full_body,
+    "publicationId": pub_id,
+    "tags": [{"slug": "medical writing"}, {"slug": "thesis"}, {"slug": "research"}]
+}}
 headers = {"Authorization": HASKNODE_TOKEN, "Content-Type": "application/json"}
 resp = requests.post("https://gql.hashnode.com/", json={"query": mutation, "variables": variables}, headers=headers)
 if resp.status_code == 200:
