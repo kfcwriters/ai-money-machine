@@ -2,7 +2,7 @@ name: Weekly Medical SEO Article
 
 on:
   schedule:
-    - cron: '0 16 * * 3'   # Every Wednesday at 16:00 UTC
+    - cron: '0 16 * * *'   # Daily at 16:00 UTC
   workflow_dispatch:
 
 jobs:
