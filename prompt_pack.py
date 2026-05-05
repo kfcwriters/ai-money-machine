@@ -1,4 +1,4 @@
-import os, sys, logging, requests
+import os, sys, logging, requests, textwrap
 from fpdf import FPDF
 
 logging.basicConfig(level=logging.INFO, stream=sys.stdout,
@@ -7,7 +7,6 @@ logging.basicConfig(level=logging.INFO, stream=sys.stdout,
 GROQ_API_KEY = os.environ["GROQ_API_KEY"]
 GUMROAD_TOKEN = os.environ["GUMROAD_TOKEN"]
 
-# ---------- GET PROMPTS FROM GROQ ----------
 def generate_prompts():
     prompt = """You are an expert in medical and academic writing. Generate 10 high-quality, reusable ChatGPT prompts that help researchers, PhD students, or clinicians with tasks like:
 - Writing a thesis synopsis
@@ -33,7 +32,6 @@ Return them as a numbered list, with clear separation between each. Do not add e
         return resp.json()["choices"][0]["message"]["content"]
     raise Exception(f"Groq error {resp.status_code}")
 
-# ---------- CREATE PDF ----------
 def create_pdf(content):
     pdf = FPDF()
     pdf.add_page()
@@ -45,10 +43,14 @@ def create_pdf(content):
     pdf.cell(0, 10, "Medical & Academic Writing – Prompt Pack", new_x="LMARGIN", new_y="NEXT", align="C")
     pdf.ln(8)
     pdf.set_font("DejaVu", "", 11)
-    pdf.multi_cell(0, 6, "10 powerful ChatGPT prompts to accelerate your research and writing workflow.")
+    # Use safe multi_cell only for short intro text
+    intro = "10 powerful ChatGPT prompts to accelerate your research and writing workflow."
+    for intro_chunk in textwrap.wrap(intro, width=90):
+        pdf.cell(0, 6, intro_chunk, new_x="LMARGIN", new_y="NEXT")
     pdf.ln(6)
 
     pdf.set_font("DejaVu", "", 11)
+    max_chars = 90
     for line in content.split("\n"):
         line = line.strip()
         if not line:
@@ -59,11 +61,12 @@ def create_pdf(content):
             pdf.cell(0, 6, line.strip("*"), new_x="LMARGIN", new_y="NEXT")
             pdf.set_font("DejaVu", "", 11)
         else:
-            pdf.multi_cell(0, 6, line)
+            # Break long lines safely
+            for chunk in textwrap.wrap(line, width=max_chars):
+                pdf.cell(0, 6, chunk, new_x="LMARGIN", new_y="NEXT")
     pdf.output("prompt_pack.pdf")
     return "prompt_pack.pdf"
 
-# ---------- PUBLISH TO GUMROAD ----------
 def publish_to_gumroad(pdf_path):
     headers = {"Authorization": f"Bearer {GUMROAD_TOKEN}"}
     data = {"name": "Medical & Academic Writing – ChatGPT Prompt Pack",
@@ -78,7 +81,6 @@ def publish_to_gumroad(pdf_path):
     short_url = resp.json()["product"].get("short_url", "no-url")
     logging.info(f"Product created: {short_url}")
 
-    # Upload file
     upload_url = f"https://api.gumroad.com/v2/products/{product_id}/variant_files"
     with open(pdf_path, "rb") as f:
         files = {"file": ("PromptPack.pdf", f, "application/pdf")}
@@ -88,7 +90,6 @@ def publish_to_gumroad(pdf_path):
     else:
         logging.warning(f"File upload failed: {resp2.text}")
 
-# ---------- MAIN ----------
 def main():
     logging.info("=== Weekly Prompt Pack Generator ===")
     try:
