@@ -23,7 +23,8 @@ KEYWORDS = [
 
 def llm_generate(prompt):
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
-    payload = {"model": "llama-3.3-70b-versatile", "messages": [{"role":"user","content":prompt}], "temperature":0.8, "max_completion_tokens":2048}
+    payload = {"model": "llama-3.3-70b-versatile", "messages": [{"role":"user","content":prompt}],
+               "temperature":0.8, "max_completion_tokens":2048}
     resp = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload, timeout=60)
     if resp.status_code == 200:
         return resp.json()["choices"][0]["message"]["content"]
@@ -60,7 +61,12 @@ if not pub_id:
     raise Exception("Cannot get publication ID")
 
 mutation = """mutation PublishPost($input: PublishPostInput!) { publishPost(input: $input) { post { slug, url } } }"""
-variables = {"input": {"title": title, "contentMarkdown": full_body, "publicationId": pub_id, "tags": ["biochemistry", "tutoring", "medical education"]}}
+variables = {"input": {
+    "title": title,
+    "contentMarkdown": full_body,
+    "publicationId": pub_id,
+    "tags": [{"slug": "biochemistry"}, {"slug": "tutoring"}, {"slug": "medical education"}]
+}}
 headers = {"Authorization": HASKNODE_TOKEN, "Content-Type": "application/json"}
 resp = requests.post("https://gql.hashnode.com/", json={"query": mutation, "variables": variables}, headers=headers)
 if resp.status_code == 200:
