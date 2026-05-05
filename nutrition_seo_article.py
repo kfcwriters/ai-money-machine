@@ -69,6 +69,7 @@ variables = {"input": {
     "title": title,
     "contentMarkdown": full_body,
     "publicationId": pub_id,
+    "shouldSubmit": True,
     "tags": [
         {"slug": "nutrition", "name": "Nutrition"},
         {"slug": "diet", "name": "Diet"},
