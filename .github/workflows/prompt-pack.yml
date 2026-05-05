@@ -1,0 +1,24 @@
+name: Weekly Prompt Pack
+
+on:
+  schedule:
+    - cron: '0 17 * * 3'   # Every Wednesday at 17:00 UTC
+  workflow_dispatch:
+
+jobs:
+  create-pack:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install libraries
+        run: pip install requests fpdf2
+      - name: Generate and publish prompt pack
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GUMROAD_TOKEN: ${{ secrets.GUMROAD_TOKEN }}
+        run: python prompt_pack.py
