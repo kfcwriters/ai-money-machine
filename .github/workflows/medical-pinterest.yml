@@ -1,0 +1,26 @@
+name: Daily Medical Pinterest Pin
+
+on:
+  schedule:
+    - cron: '0 10 * * *'   # Daily at 10:00 UTC
+  workflow_dispatch:        # Manual trigger button
+
+jobs:
+  pin:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install libraries
+        run: pip install requests pillow
+      - name: Create and post pin
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          PINTEREST_ACCESS_TOKEN: ${{ secrets.PINTEREST_ACCESS_TOKEN }}
+          PINTEREST_APP_ID: ${{ secrets.PINTEREST_APP_ID }}
+          HIRE_ME_URL: ${{ secrets.HIRE_ME_URL }}
+        run: python medical_pin.py
