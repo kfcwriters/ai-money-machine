@@ -2,7 +2,7 @@ name: AI Money Machine Daily Run
 
 on:
   schedule:
-    - cron: '0 8 * * *'
+    - cron: '0 8 * * *'   # Daily at 08:00 UTC
   workflow_dispatch:
 
 jobs:
@@ -31,4 +31,5 @@ jobs:
           HASKNODE_TOKEN: ${{ secrets.HASKNODE_TOKEN }}
           HASKNODE_PUBLICATION_ID: ${{ secrets.HASKNODE_PUBLICATION_ID }}
           PINTEREST_ACCESS_TOKEN: ${{ secrets.PINTEREST_ACCESS_TOKEN }}
+          HIRE_ME_URL: ${{ secrets.HIRE_ME_URL }}
         run: python main.py
