@@ -2,8 +2,8 @@ name: AI Money Machine Daily Run
 
 on:
   schedule:
-    - cron: '0 8 * * *'   # Daily at 8:00 UTC — change if you want
-  workflow_dispatch:      # Manual trigger button
+    - cron: '0 8 * * *'   # Daily at 08:00 UTC
+  workflow_dispatch:
 
 jobs:
   run-script:
@@ -22,7 +22,6 @@ jobs:
 
       - name: Run the AI Money Machine
         env:
-          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
           GUMROAD_TOKEN: ${{ secrets.GUMROAD_TOKEN }}
           TWITTER_API_KEY: ${{ secrets.TWITTER_API_KEY }}
