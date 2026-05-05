@@ -16,6 +16,9 @@ PINTEREST_ACCESS_TOKEN = os.environ["PINTEREST_ACCESS_TOKEN"]
 PINTEREST_APP_ID = os.environ.get("PINTEREST_APP_ID", "")
 HIRE_ME_URL = os.environ["HIRE_ME_URL"]
 
+# ---------- USE SANDBOX WHILE APP IS PENDING ----------
+API_BASE = "https://api-sandbox.pinterest.com/v5"
+
 # ---------- GROQ ----------
 def get_tip():
     prompt = """You are a medical writing expert. Write a short, interesting tip (1-2 sentences) that helps researchers, doctors, or PhD students improve their medical manuscript, case report, or journal submission. Make it sound like a reason to click for more help.
@@ -79,10 +82,10 @@ def create_pin_image(tip):
     img_bytes.seek(0)
     return img_bytes
 
-# ---------- POST TO PINTEREST ----------
+# ---------- POST TO PINTEREST (SANDBOX) ----------
 def publish_pin(image_bytes, tip):
     # Step 1: Upload image to get media_id
-    media_url = "https://api.pinterest.com/v5/media"
+    media_url = f"{API_BASE}/media"
     files = {"file": ("pin.png", image_bytes, "image/png")}
     media_resp = requests.post(media_url, headers={"Authorization": f"Bearer {PINTEREST_ACCESS_TOKEN}"}, files=files)
     if media_resp.status_code != 200:
@@ -91,7 +94,7 @@ def publish_pin(image_bytes, tip):
     logging.info(f"Uploaded image, media_id: {media_id}")
 
     # Step 2: Find or create the board "Medical Writing Tips"
-    boards_url = f"https://api.pinterest.com/v5/boards?app_id={PINTEREST_APP_ID}"
+    boards_url = f"{API_BASE}/boards?app_id={PINTEREST_APP_ID}"
     boards_resp = requests.get(boards_url, headers={"Authorization": f"Bearer {PINTEREST_ACCESS_TOKEN}"})
     boards = boards_resp.json().get("items", [])
     board_id = None
@@ -105,7 +108,7 @@ def publish_pin(image_bytes, tip):
             "description": "Daily tips for medical writers and researchers. Professional services available at the link.",
             "app_id": PINTEREST_APP_ID
         }
-        create_resp = requests.post("https://api.pinterest.com/v5/boards",
+        create_resp = requests.post(f"{API_BASE}/boards",
                                     headers={"Authorization": f"Bearer {PINTEREST_ACCESS_TOKEN}"},
                                     json=create_board_data)
         if create_resp.status_code == 200:
@@ -115,7 +118,6 @@ def publish_pin(image_bytes, tip):
             raise Exception(f"Failed to create board: {create_resp.status_code} {create_resp.text}")
 
     # Step 3: Create pin
-    pin_url = "https://api.pinterest.com/v5/pins"
     pin_data = {
         "link": HIRE_ME_URL,
         "title": f"Medical Writing Tip: {tip[:80]}",
@@ -126,7 +128,10 @@ def publish_pin(image_bytes, tip):
             "source_type": "media_id"
         }
     }
-    pin_resp = requests.post(pin_url, headers={"Authorization": f"Bearer {PINTEREST_ACCESS_TOKEN}", "Content-Type": "application/json"}, json=pin_data)
+    pin_resp = requests.post(f"{API_BASE}/pins",
+                             headers={"Authorization": f"Bearer {PINTEREST_ACCESS_TOKEN}",
+                                      "Content-Type": "application/json"},
+                             json=pin_data)
     if pin_resp.status_code == 200:
         logging.info("Pin created successfully!")
     else:
