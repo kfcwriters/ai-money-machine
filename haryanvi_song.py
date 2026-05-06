@@ -2,6 +2,8 @@ import os, sys, logging, json, random, textwrap, requests, subprocess, asyncio
 from pathlib import Path
 import numpy as np
 from moviepy import VideoFileClip, AudioFileClip, CompositeVideoClip, ImageClip
+
+# Import only what's needed to reduce memory
 from PIL import Image, ImageDraw, ImageFont
 
 # ---------- LOGGING ----------
@@ -18,13 +20,14 @@ TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 TELEGRAM_CHANNEL_ID = os.environ["TELEGRAM_CHANNEL_ID"]
 
 # ---------- CONFIG ----------
-VIDEO_WIDTH, VIDEO_HEIGHT = 1080, 1920
+# REDUCED resolution to prevent memory exhaustion
+VIDEO_WIDTH, VIDEO_HEIGHT = 720, 1280   # 720p instead of 1080p
 OUTPUT_FILE = "haryanvi_song.mp4"
 FONT_PATH = "font.ttf"
-VOICE_NAME = "hi-IN-SwaraNeural"                 # ✅ Correct Hindi female voice
+VOICE_NAME = "hi-IN-SwaraNeural"
 SUNO_API_BASE = "https://suno-api.vercel.app"
 
-# ─────────────────────────────── 1. LYRICS ───────────────────────────────
+# ─────────────── 1. LYRICS ───────────────
 def generate_lyrics():
     prompt = """You are a talented Haryanvi songwriter. Write a romantic Haryanvi song in Hindi script.
 The song should be about love, villages, fields, and traditional relationships.
@@ -43,11 +46,13 @@ Return the lyrics only, no extra text."""
     lyrics = resp.json()["choices"][0]["message"]["content"].strip()
     lines = [line.strip() for line in lyrics.split("\n") if line.strip()]
     logging.info(f"Lyrics generated: {len(lines)} lines")
-    return lines, lyrics
+    # LIMIT to 8 lines maximum to keep video short
+    if len(lines) > 8:
+        lines = lines[:8]
+    return lines, " ".join(lines)
 
-# ─────────────────────────────── 2. AUDIO (SUNO or TTS fallback) ─────────
+# ─────────────── 2. AUDIO (SUNO with TTS fallback) ───────────────
 def generate_suno_song(lyrics_text):
-    """Try Suno; if it fails, return None so we use TTS."""
     url = f"{SUNO_API_BASE}/api/custom_generate"
     payload = {
         "title": "Haryanvi Romantic Song",
@@ -70,7 +75,6 @@ def generate_suno_song(lyrics_text):
         if not audio_url:
             logging.warning("Suno response missing audio_url. Using TTS.")
             return None
-        # Download
         r = requests.get(audio_url, timeout=120)
         with open("song_audio.mp3", "wb") as f:
             f.write(r.content)
@@ -81,7 +85,6 @@ def generate_suno_song(lyrics_text):
         return None
 
 async def generate_tts_narration(script_lines):
-    """Fallback: Edge TTS narration with Hindi voice."""
     full_text = " ".join(script_lines)
     audio_file = "fallback_audio.mp3"
     cmd = ["edge-tts", "--text", full_text, "--voice", VOICE_NAME, "--write-media", audio_file]
@@ -93,17 +96,16 @@ async def generate_tts_narration(script_lines):
     logging.info("TTS fallback audio generated.")
     return audio_file
 
-# ─────────────────────────────── 3. STOCK FOOTAGE ────────────────────────
+# ─────────────── 3. STOCK FOOTAGE (LIMITED to 3 clips) ───────────────
 def fetch_stock_videos(script_lines):
+    """Fetch only 3 clips maximum and reuse them to save memory."""
     video_paths = []
     search_terms = [
         "romantic couple village",
         "haryanvi culture",
         "Indian wedding couple",
-        "sunset fields love",
-        "hand in hand couple",
     ]
-    for i, _ in enumerate(script_lines):
+    for i in range(3):  # Only fetch 3 clips
         query = random.choice(search_terms)
         url = f"https://pixabay.com/api/videos/?key={PIXABAY_API_KEY}&q={requests.utils.quote(query)}&per_page=3&min_width=1920"
         resp = requests.get(url, timeout=30)
@@ -122,70 +124,68 @@ def fetch_stock_videos(script_lines):
                     f.write(r.content)
                 video_paths.append(local_path)
                 logging.info(f"Stock {i} downloaded.")
-                continue
-        # fallback generic search
-        fallback_url = f"https://pixabay.com/api/videos/?key={PIXABAY_API_KEY}&q=love&per_page=1&min_width=1920"
-        fresp = requests.get(fallback_url, timeout=30)
-        if fresp.status_code == 200:
-            fdata = fresp.json()
-            fhits = fdata.get("hits", [])
-            if fhits:
-                fbest = fhits[0]
-                fvideo_url = (fbest.get("videos", {}).get("large", {}) or {}).get("url") or \
-                             (fbest.get("videos", {}).get("medium", {}) or {}).get("url")
-                if fvideo_url:
-                    local_path = f"stock_{i}.mp4"
-                    r = requests.get(fvideo_url, timeout=60)
-                    with open(local_path, "wb") as f:
-                        f.write(r.content)
-                    video_paths.append(local_path)
-                    logging.info(f"Fallback stock {i} downloaded.")
     logging.info(f"Total stock clips: {len(video_paths)}")
     return video_paths
 
-# ─────────────────────────────── 4. SUBTITLES (pink) ────────────────────
+# ─────────────── 4. SUBTITLES (pink) ───────────────
 def create_subtitle_image(text, w, h):
     img = Image.new("RGBA", (w, h), (0,0,0,0))
     draw = ImageDraw.Draw(img)
     try:
-        font = ImageFont.truetype(FONT_PATH, 42)
+        font = ImageFont.truetype(FONT_PATH, 36)   # Smaller font for 720p
     except:
         font = ImageFont.load_default()
     wrapped = textwrap.wrap(text, width=30)
-    y = h - (len(wrapped) * 65) - 80
+    y = h - (len(wrapped) * 60) - 60
     for line in wrapped:
         bbox = draw.textbbox((0,0), line, font=font)
         tw = bbox[2] - bbox[0]
         x = (w - tw) / 2
-        draw.rectangle((x-15, y-5, x+tw+15, y+55), fill=(0,0,0,160))
-        draw.text((x, y), line, font=font, fill=(255,182,193))   # pink
-        y += 65
+        draw.rectangle((x-12, y-4, x+tw+12, y+48), fill=(0,0,0,160))
+        draw.text((x, y), line, font=font, fill=(255,182,193))
+        y += 60
     return np.array(img)
 
-# ─────────────────────────────── 5. VIDEO ASSEMBLY ───────────────────────
+# ─────────────── 5. VIDEO ASSEMBLY (optimized) ───────────────
 def assemble_video(lines, video_paths, audio_path):
+    """Assemble video with memory-efficient settings."""
     audio = AudioFileClip(audio_path)
     seg_dur = audio.duration / max(len(lines), 1)
     clips = []
+    
+    # Preload video clips once to avoid reopening
+    loaded_clips = []
+    for vp in video_paths:
+        if Path(vp).exists():
+            v = VideoFileClip(vp).without_audio().resized(height=VIDEO_HEIGHT)
+            loaded_clips.append(v)
+    
+    # Fallback black clip
+    black_clip = VideoFileClip("fallback_black.mp4").without_audio().resized(new_size=(VIDEO_WIDTH, VIDEO_HEIGHT))
+    
     for i, line in enumerate(lines):
-        if i < len(video_paths) and Path(video_paths[i]).exists():
-            v = VideoFileClip(video_paths[i]).without_audio().resized(height=VIDEO_HEIGHT)
+        # Use one of the loaded clips (recycle if needed)
+        if loaded_clips:
+            v = loaded_clips[i % len(loaded_clips)]
         else:
-            v = (VideoFileClip("fallback_black.mp4").without_audio()
-                 .resized(new_size=(VIDEO_WIDTH, VIDEO_HEIGHT)))
+            v = black_clip
+        
         v = v.with_duration(seg_dur)
         if v.duration < seg_dur:
             v = v.loop(duration=seg_dur)
+        
         sub = ImageClip(create_subtitle_image(line, VIDEO_WIDTH, VIDEO_HEIGHT), duration=seg_dur)
         comp = CompositeVideoClip([v, sub]).with_start(i * seg_dur)
         clips.append(comp)
+    
     final = CompositeVideoClip(clips)
     final.audio = audio
-    final.write_videofile(OUTPUT_FILE, fps=24, codec="libx264", audio_codec="aac",
-                          preset="ultrafast", threads=2)
+    # Use ultrafast preset and lower quality to save memory
+    final.write_videofile(OUTPUT_FILE, fps=15, codec="libx264", audio_codec="aac",
+                          preset="ultrafast", threads=1, bitrate="500k")
     logging.info(f"Video assembled: {OUTPUT_FILE}")
 
-# ─────────────────────────────── 6. TELEGRAM UPLOAD ──────────────────────
+# ─────────────── 6. TELEGRAM UPLOAD ───────────────
 def upload_to_telegram(video_path):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendVideo"
     with open(video_path, "rb") as f:
@@ -197,29 +197,24 @@ def upload_to_telegram(video_path):
     else:
         logging.error(f"Telegram upload failed: {resp.status_code} {resp.text}")
 
-# ─────────────────────────────── MAIN ────────────────────────────────────
+# ─────────────── MAIN ───────────────
 async def main():
     logging.info("=== Haryanvi Romantic Song Generator ===")
     try:
         lines, full_lyrics = generate_lyrics()
-
-        # Try Suno first
         audio_file = generate_suno_song(full_lyrics)
         if not audio_file:
-            # Fallback to TTS narration
             audio_file = await generate_tts_narration(lines)
-
+        
         video_paths = fetch_stock_videos(lines)
-
-        # Create fallback black video if needed
+        
         if not Path("fallback_black.mp4").exists():
             subprocess.run(["ffmpeg", "-f", "lavfi", "-i",
                             f"color=c=black:s={VIDEO_WIDTH}x{VIDEO_HEIGHT}:d=10",
                             "-c:v", "libx264", "-t", "10", "fallback_black.mp4"], check=True)
-
+        
         assemble_video(lines, video_paths, audio_file)
         upload_to_telegram(OUTPUT_FILE)
-
         logging.info("=== Done! ===")
     except Exception as e:
         logging.exception("Fatal error")
