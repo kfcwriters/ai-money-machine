@@ -1,4 +1,4 @@
-import os, sys, logging, json, random, textwrap, requests, subprocess, asyncio
+import os, sys, logging, json, random, textwrap, requests, subprocess, asyncio, time
 from pathlib import Path
 import numpy as np
 from moviepy import VideoFileClip, AudioFileClip, TextClip, CompositeVideoClip, concatenate_videoclips, vfx
@@ -12,6 +12,8 @@ logging.basicConfig(level=logging.INFO, stream=sys.stdout,
 # ---------- API KEYS ----------
 OPENROUTER_API_KEY = os.environ["OPENROUTER_API_KEY"]
 PIXABAY_API_KEY = os.environ["PIXABAY_API_KEY"]
+TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
+TELEGRAM_CHANNEL_ID = os.environ["TELEGRAM_CHANNEL_ID"]   # @username or numeric ID
 
 # ---------- CONFIG ----------
 VIDEO_WIDTH, VIDEO_HEIGHT = 1080, 1920  # 9:16 vertical for shorts
@@ -62,7 +64,6 @@ Script:"""
 async def generate_voiceover(script_lines):
     full_text = " ".join(script_lines)
     audio_file = "voiceover.mp3"
-    # edge-tts is a CLI tool; we call it via subprocess
     cmd = ["edge-tts", "--text", full_text, "--voice", VOICE_NAME, "--write-media", audio_file]
     process = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
     stdout, stderr = await process.communicate()
@@ -75,7 +76,6 @@ async def generate_voiceover(script_lines):
 def fetch_stock_videos(script_lines):
     video_paths = []
     for i, line in enumerate(script_lines):
-        # Use the line as search query (take first 80 chars)
         query = line[:80]
         url = f"https://pixabay.com/api/videos/?key={PIXABAY_API_KEY}&q={requests.utils.quote(query)}&per_page=3&min_width=1920"
         resp = requests.get(url, timeout=30)
@@ -85,9 +85,7 @@ def fetch_stock_videos(script_lines):
         data = resp.json()
         hits = data.get("hits", [])
         if hits:
-            # Pick the best-quality video
             best = max(hits, key=lambda h: h.get("likes", 0))
-            # Get the large size video URL
             videos = best.get("videos", {})
             if "large" in videos:
                 video_url = videos["large"]["url"]
@@ -95,7 +93,6 @@ def fetch_stock_videos(script_lines):
                 video_url = videos["medium"]["url"]
             else:
                 continue
-            # Download
             local_path = f"stock_{i}.mp4"
             vresp = requests.get(video_url, timeout=60)
             with open(local_path, "wb") as f:
@@ -103,7 +100,6 @@ def fetch_stock_videos(script_lines):
             video_paths.append(local_path)
             logging.info(f"Downloaded stock footage for scene {i}: {best.get('id')}")
         else:
-            # Fallback: request without query to get any video
             fallback_url = f"https://pixabay.com/api/videos/?key={PIXABAY_API_KEY}&per_page=1&min_width=1920"
             fresp = requests.get(fallback_url, timeout=30)
             if fresp.status_code == 200:
@@ -120,7 +116,6 @@ def fetch_stock_videos(script_lines):
                             f.write(vresp.content)
                         video_paths.append(local_path)
                         logging.info(f"Fallback footage downloaded for scene {i}.")
-
     logging.info(f"Downloaded {len(video_paths)} stock clips.")
     return video_paths
 
@@ -132,14 +127,12 @@ def create_subtitle_image(text, width, height):
         font = ImageFont.truetype(FONT_PATH, 52)
     except:
         font = ImageFont.load_default()
-    # Word wrap
     wrapped = textwrap.wrap(text, width=25)
     y_offset = height - (len(wrapped) * 70) - 80
     for line in wrapped:
         bbox = draw.textbbox((0, 0), line, font=font)
         text_width = bbox[2] - bbox[0]
         x = (width - text_width) / 2
-        # Semi-transparent background
         bg_bbox = (x - 15, y_offset - 5, x + text_width + 15, y_offset + 60)
         draw.rectangle(bg_bbox, fill=(0, 0, 0, 160))
         draw.text((x, y_offset), line, font=font, fill=(255, 255, 255, 255))
@@ -149,35 +142,27 @@ def create_subtitle_image(text, width, height):
 
 # ---------- STEP 5: ASSEMBLE VIDEO ----------
 def assemble_video(script_lines, video_paths, audio_path):
-    # Load audio
     audio = AudioFileClip(audio_path)
     total_duration = audio.duration
     segment_duration = total_duration / max(len(script_lines), 1)
 
-    # Process each scene
     clips = []
     for i, line in enumerate(script_lines):
-        # Video clip
         if i < len(video_paths) and Path(video_paths[i]).exists():
             vclip = VideoFileClip(video_paths[i]).without_audio()
-            # Resize to fill vertical frame (crop to center)
             vclip = vclip.resized(height=VIDEO_HEIGHT)
             if vclip.w > VIDEO_WIDTH:
                 vclip = vclip.with_position("center")
         else:
-            # Black fallback
             vclip = VideoFileClip("fallback_black.mp4").without_audio().resized(new_size=(VIDEO_WIDTH, VIDEO_HEIGHT))
 
-        # Trim to segment duration
         vclip = vclip.with_duration(segment_duration)
         if vclip.duration < segment_duration:
             vclip = vclip.loop(duration=segment_duration)
 
-        # Subtitle image
         sub_img = create_subtitle_image(line, VIDEO_WIDTH, VIDEO_HEIGHT)
         sub_clip = ImageClip(sub_img, duration=segment_duration)
 
-        # Composite
         comp = CompositeVideoClip([vclip, sub_clip])
         comp = comp.with_start(i * segment_duration)
         clips.append(comp)
@@ -188,30 +173,37 @@ def assemble_video(script_lines, video_paths, audio_path):
                           preset="ultrafast", threads=2)
     logging.info(f"Video saved to {OUTPUT_FILE}")
 
+# ---------- STEP 6: UPLOAD TO TELEGRAM ----------
+def upload_to_telegram(video_path):
+    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendVideo"
+    with open(video_path, "rb") as f:
+        files = {"video": f}
+        data = {"chat_id": TELEGRAM_CHANNEL_ID, "caption": "📹 New daily medical writing video is ready!"}
+        resp = requests.post(url, data=data, files=files, timeout=60)
+    if resp.status_code == 200:
+        logging.info("Video posted to Telegram channel!")
+    else:
+        logging.error(f"Telegram upload failed: {resp.status_code} {resp.text}")
+
 # ---------- MAIN ----------
 async def main():
     logging.info("=== Medical Writing Video Generator ===")
     try:
-        # 1. Pick topic
         topic = random.choice(TOPICS)
         logging.info(f"Topic: {topic}")
 
-        # 2. Generate script
         script = generate_script(topic)
-
-        # 3. Generate voiceover
         audio = await generate_voiceover(script)
-
-        # 4. Fetch stock footage
         videos = fetch_stock_videos(script)
 
-        # 5. Create fallback black video if needed
         if not Path("fallback_black.mp4").exists():
             subprocess.run(["ffmpeg", "-f", "lavfi", "-i", f"color=c=black:s={VIDEO_WIDTH}x{VIDEO_HEIGHT}:d=10",
                             "-c:v", "libx264", "-t", "10", "fallback_black.mp4"], check=True)
 
-        # 6. Assemble final video
         assemble_video(script, videos, audio)
+
+        # Upload to Telegram channel
+        upload_to_telegram(OUTPUT_FILE)
 
         logging.info("=== Video Generation Complete ===")
     except Exception as e:
