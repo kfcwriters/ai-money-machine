@@ -3,9 +3,9 @@ import os, sys, logging, requests, json, random
 logging.basicConfig(level=logging.INFO, stream=sys.stdout,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 
-DEEPSEEK_API_KEY = os.environ["DEEPSEEK_API_KEY"]
+OPENROUTER_API_KEY = os.environ["OPENROUTER_API_KEY"]
 DEVTO_API_KEY = os.environ["DEVTO_API_KEY"]
-HIRE_ME_URL = os.environ["HIRE_ME_URL_BIOCHEM"]   # BioChemTutor Carrd page
+HIRE_ME_URL = os.environ["HIRE_ME_URL_BIOCHEM"]
 
 KEYWORDS = [
     "biochemistry tutor online",
@@ -21,20 +21,21 @@ KEYWORDS = [
 ]
 
 def llm_generate(prompt):
-    url = "https://api.deepseek.com/v1/chat/completions"
+    url = "https://openrouter.ai/api/v1/chat/completions"
     headers = {
-        "Authorization": f"Bearer {DEEPSEEK_API_KEY}",
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "HTTP-Referer": "https://github.com",       # optional, can be anything
         "Content-Type": "application/json"
     }
     payload = {
-        "model": "deepseek-chat",
+        "model": "meta-llama/llama-3-8b-instruct:free",
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.8,
         "max_tokens": 2048
     }
     resp = requests.post(url, headers=headers, json=payload, timeout=60)
     if resp.status_code != 200:
-        raise Exception(f"DeepSeek error {resp.status_code}: {resp.text}")
+        raise Exception(f"OpenRouter error {resp.status_code}: {resp.text}")
     result = resp.json()
     return result["choices"][0]["message"]["content"]
 
@@ -60,10 +61,7 @@ payload = {
         "tags": ["biochemistry", "tutoring", "medical"]
     }
 }
-headers = {
-    "Content-Type": "application/json",
-    "api-key": DEVTO_API_KEY
-}
+headers = {"Content-Type": "application/json", "api-key": DEVTO_API_KEY}
 resp = requests.post("https://dev.to/api/articles", headers=headers, json=payload)
 
 if resp.status_code == 201:
