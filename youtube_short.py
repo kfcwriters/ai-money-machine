@@ -12,7 +12,7 @@ logging.basicConfig(level=logging.INFO, stream=sys.stdout,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 
 OPENROUTER_API_KEY = os.environ["OPENROUTER_API_KEY"]
-PIXABAY_API_KEY    = os.environ["PIXABAY_API_KEY"]          # <-- already in secrets
+PIXABAY_API_KEY    = os.environ["PIXABAY_API_KEY"]
 CLIENT_ID     = os.environ["YOUTUBE_CLIENT_ID"]
 CLIENT_SECRET = os.environ["YOUTUBE_CLIENT_SECRET"]
 REFRESH_TOKEN = os.environ["YOUTUBE_REFRESH_TOKEN"]
@@ -62,7 +62,6 @@ def fetch_stock_clip():
     if not hits:
         logging.warning("No stock footage found.")
         return None
-    # Pick the most liked video
     best = max(hits, key=lambda h: h.get("likes", 0))
     video_url = None
     for size in ("large", "medium"):
@@ -94,11 +93,9 @@ def create_subtitle_image(text, w, h):
         bbox = draw.textbbox((0,0), line, font=font)
         tw = bbox[2] - bbox[0]
         x = (w - tw) / 2
-        # semi-transparent black background for readability
         draw.rectangle((x-15, y-5, x+tw+15, y+65), fill=(0,0,0,180))
         draw.text((x, y), line, font=font, fill=(255,255,255))
         y += 75
-    # small CTA
     cta = "kfcwriters.github.io"
     cta_font = ImageFont.truetype(FONT_PATH, 32) if FONT_PATH else ImageFont.load_default()
     bbox = draw.textbbox((0,0), cta, font=cta_font)
@@ -112,17 +109,13 @@ def create_video(text, audio_path, stock_path):
     duration = audio.duration
 
     if stock_path and Path(stock_path).exists():
-        # Use stock footage as background
         video_bg = VideoFileClip(stock_path).without_audio()
-        # Resize to fill vertical frame, crop to center
         video_bg = video_bg.resized(height=VIDEO_HEIGHT)
         if video_bg.w > VIDEO_WIDTH:
             video_bg = video_bg.with_position("center")
     else:
-        # Fallback: blue gradient static image
         img = Image.new("RGB", (VIDEO_WIDTH, VIDEO_HEIGHT), "#0d47a1")
         draw = ImageDraw.Draw(img)
-        # Simple gradient effect
         for i in range(VIDEO_HEIGHT):
             draw.line([(0, i), (VIDEO_WIDTH, i)], fill=(13, 71, 161, i//4))
         video_bg = ImageClip(np.array(img)).with_duration(duration)
@@ -131,7 +124,6 @@ def create_video(text, audio_path, stock_path):
     if video_bg.duration < duration:
         video_bg = video_bg.loop(duration=duration)
 
-    # Overlay subtitle
     sub_img = create_subtitle_image(text, VIDEO_WIDTH, VIDEO_HEIGHT)
     sub_clip = ImageClip(sub_img, duration=duration)
 
@@ -172,7 +164,10 @@ async def main():
     audio = await generate_tts(tip)
     stock = fetch_stock_clip()
     create_video(tip, audio, stock)
-    upload_to_youtube(OUTPUT_FILE, "Medical Writing Tip #Shorts", tip)
+
+    # Build description with website link
+    description = f"{tip}\n\nNeed professional medical writing help? Visit: https://kfcwriters.github.io"
+    upload_to_youtube(OUTPUT_FILE, "Medical Writing Tip #Shorts", description)
     logging.info("Done.")
 
 if __name__ == "__main__":
