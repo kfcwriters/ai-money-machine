@@ -1,37 +1,41 @@
 import os, sys, json, logging, textwrap, requests, tweepy
 from fpdf import FPDF
 
-# ---------- LOGGING ----------
 logging.basicConfig(level=logging.INFO, stream=sys.stdout, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# ---------- API KEYS ----------
-GROQ_API_KEY   = os.environ["GROQ_API_KEY"]
-GUMROAD_TOKEN  = os.environ["GUMROAD_TOKEN"]
-TWITTER_API_KEY       = os.environ["TWITTER_API_KEY"]
-TWITTER_API_KEY_SECRET= os.environ["TWITTER_API_KEY_SECRET"]
-TWITTER_ACCESS_TOKEN  = os.environ["TWITTER_ACCESS_TOKEN"]
+OPENROUTER_API_KEY = os.environ["OPENROUTER_API_KEY"]
+GUMROAD_TOKEN = os.environ["GUMROAD_TOKEN"]
+TWITTER_API_KEY = os.environ["TWITTER_API_KEY"]
+TWITTER_API_KEY_SECRET = os.environ["TWITTER_API_KEY_SECRET"]
+TWITTER_ACCESS_TOKEN = os.environ["TWITTER_ACCESS_TOKEN"]
 TWITTER_ACCESS_TOKEN_SECRET = os.environ["TWITTER_ACCESS_TOKEN_SECRET"]
-HASKNODE_TOKEN        = os.environ["HASKNODE_TOKEN"]
-HASKNODE_PUBLICATION_HOST = os.environ["HASKNODE_PUBLICATION_ID"]   # the domain
+HASKNODE_TOKEN = os.environ["HASKNODE_TOKEN"]
+HASKNODE_PUBLICATION_HOST = os.environ["HASKNODE_PUBLICATION_ID"]
 PINTEREST_ACCESS_TOKEN = os.environ.get("PINTEREST_ACCESS_TOKEN", "")
-HIRE_ME_URL           = os.environ.get("HIRE_ME_URL", "")            # optional service CTA
-
-# ---------- GROQ ----------
-GROQ_BASE = "https://api.groq.com/openai/v1/chat/completions"
+HIRE_ME_URL = os.environ.get("HIRE_ME_URL", "")
 
 def llm_generate(prompt):
-    headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
-    payload = {"model": "llama-3.3-70b-versatile", "messages": [{"role":"user","content":prompt}], "temperature":0.8, "max_completion_tokens":2048}
-    resp = requests.post(GROQ_BASE, headers=headers, json=payload, timeout=60)
+    url = "https://openrouter.ai/api/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "HTTP-Referer": "https://github.com",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "model": "openrouter/auto",
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.8,
+        "max_tokens": 2048
+    }
+    resp = requests.post(url, headers=headers, json=payload, timeout=60)
     resp.raise_for_status()
-    return resp.json()["choices"][0]["message"]["content"]
+    result = resp.json()
+    return result["choices"][0]["message"]["content"]
 
-# ---------- TRENDING ----------
 def get_trending_problem():
     prompt = "You are a market researcher. Suggest ONE specific, popular problem people are actively searching for in the self-improvement, productivity, or side hustle space. It should be something that could be solved with a short $5 digital guide. Only return the problem title as a single sentence. Example: \"How to create a morning routine that actually sticks\""
     return llm_generate(prompt).strip().strip('"')
 
-# ---------- CONTENT ----------
 def generate_product(problem_title):
     prompt = f"You are a top digital product creator. Based on the problem below, write a high-value, actionable eBook (about 500 words) that solves it. Write in Markdown format. Include a catchy title, introduction, 5 practical steps, and a summary checklist.\n\nProblem: \"{problem_title}\"\n\nTitle of eBook:\n(Write the full eBook content below in Markdown)"
     full_text = llm_generate(prompt)
@@ -41,13 +45,11 @@ def generate_product(problem_title):
         title = "Ultimate Guide to " + problem_title
     return title, "\n".join(lines[1:]).strip()
 
-# ---------- SANITIZE ----------
 def sanitize_text(text):
     for orig, new in {'\u2018':"'", '\u2019':"'", '\u201c':'"', '\u201d':'"', '\u2013':'-', '\u2014':'--', '\u2026':'...', '\u2022':'-', '\u2023':'-', '\u25e6':'-', '\u00a0':' ', '\u00ad':'', '\u00b7':'-'}.items():
         text = text.replace(orig, new)
     return ''.join(ch if ord(ch) < 128 or ch == '\n' else '?' for ch in text)
 
-# ---------- PDF (textwrap only) ----------
 def create_pdf(title, content):
     pdf = FPDF()
     pdf.add_page(); pdf.set_auto_page_break(auto=True, margin=15)
@@ -77,27 +79,18 @@ def create_pdf(title, content):
     pdf.output("product.pdf")
     return "product.pdf"
 
-# ---------- GUMROAD (with error check) ----------
 def publish_to_gumroad(ebook_title, pdf_path, problem_title):
     headers = {"Authorization": f"Bearer {GUMROAD_TOKEN}"}
     data = {"name": sanitize_text(ebook_title),
             "description": f"This powerful guide solves: **{sanitize_text(problem_title)}**. Instant download.",
             "price": "499", "published": "true"}
     resp = requests.post("https://api.gumroad.com/v2/products", headers=headers, data=data, timeout=30)
-
-    if resp.status_code != 200:
-        logging.error(f"Gumroad HTTP {resp.status_code}: {resp.text}")
-        resp.raise_for_status()
-    resp_json = resp.json()
-    if not resp_json.get("success"):
-        msg = resp_json.get("message", "Unknown error")
+    if resp.status_code != 200 or not resp.json().get("success"):
+        msg = resp.json().get("message", "Unknown error")
         logging.error(f"Gumroad product creation failed: {msg}")
         raise Exception(f"Gumroad API error: {msg}")
-
-    product_id = resp_json["product"]["id"]
-    short_url = resp_json["product"].get("short_url", "no-url")
-    logging.info(f"Gumroad product created: {short_url}")
-
+    product_id = resp.json()["product"]["id"]
+    short_url = resp.json()["product"].get("short_url", "no-url")
     upload_url = f"https://api.gumroad.com/v2/products/{product_id}/variant_files"
     with open(pdf_path, "rb") as f:
         files = {"file": ("product.pdf", f, "application/pdf")}
@@ -108,7 +101,6 @@ def publish_to_gumroad(ebook_title, pdf_path, problem_title):
         logging.info("File uploaded successfully.")
     return short_url
 
-# ---------- HASKNODE (with optional service CTA) ----------
 CACHED_PUB_ID = None
 
 def get_hasnode_publication_id():
@@ -125,15 +117,9 @@ def get_hasnode_publication_id():
 
 def publish_hashnode_article(ebook_title, problem_title, gumroad_url):
     publication_id = get_hasnode_publication_id()
-
-    # If HIRE_ME_URL is available, add a soft service CTA to the blog post
-    service_cta = ""
-    if HIRE_ME_URL:
-        service_cta = f" Need professional medical writing help? Visit {HIRE_ME_URL}."
-    blog_prompt = f"""Write a helpful 300‑word blog article about: "{problem_title}". End with: 'Get the full $4.99 guide here: [GUIDE_LINK].'{service_cta} Use friendly tone."""
-
+    service_cta = f" Need professional medical writing help? Visit {HIRE_ME_URL}." if HIRE_ME_URL else ""
+    blog_prompt = f"Write a helpful 300‑word blog article about: \"{problem_title}\". End with: 'Get the full $4.99 guide here: [GUIDE_LINK].{service_cta}' Use friendly tone."
     blog_body = llm_generate(blog_prompt).replace("[GUIDE_LINK]", gumroad_url)
-
     query = """mutation PublishPost($input: PublishPostInput!) { publishPost(input: $input) { post { slug, url } } }"""
     variables = {"input": {"title": f"How to {sanitize_text(ebook_title)}", "contentMarkdown": blog_body, "publicationId": publication_id, "tags": []}}
     headers = {"Authorization": HASKNODE_TOKEN, "Content-Type": "application/json"}
@@ -148,7 +134,6 @@ def publish_hashnode_article(ebook_title, problem_title, gumroad_url):
     else:
         logging.error(f"Hashnode request failed: {resp.text}")
 
-# ---------- TWITTER / PINTEREST ----------
 def send_tweet(title, url):
     try:
         client = tweepy.Client(consumer_key=TWITTER_API_KEY, consumer_secret=TWITTER_API_KEY_SECRET,
@@ -161,7 +146,6 @@ def create_pin(url, title):
     if not PINTEREST_ACCESS_TOKEN: return
     logging.info("Pinterest pin skipped (image needed).")
 
-# ---------- MAIN ----------
 def main():
     logging.info("=== AI Money Machine Run Starting ===")
     try:
