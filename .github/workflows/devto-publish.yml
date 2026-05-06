@@ -2,7 +2,7 @@ name: Dev.to Auto-Publish
 
 on:
   schedule:
-    - cron: '0 13 * * *'   # Daily at 13:00 UTC
+    - cron: '0 13 * * *'
   workflow_dispatch:
 
 jobs:
@@ -22,5 +22,5 @@ jobs:
           DEVTO_API_KEY: ${{ secrets.DEVTO_API_KEY }}
           HASKNODE_PUBLICATION_ID: ${{ secrets.HASKNODE_PUBLICATION_ID }}
           HIRE_ME_URL: ${{ secrets.HIRE_ME_URL }}
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
         run: python devto_publish.py
