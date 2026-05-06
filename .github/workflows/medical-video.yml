@@ -1,0 +1,45 @@
+name: Daily Medical Writing Video
+
+on:
+  schedule:
+    - cron: '0 5 * * *'   # Daily at 05:00 UTC (10:30 AM IST)
+  workflow_dispatch:        # Manual trigger for testing
+
+jobs:
+  create-video:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup FFmpeg
+        uses: FedericoCarboni/setup-ffmpeg@v3
+        with:
+          ffmpeg-version: '7.1'
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y imagemagick
+
+      - name: Install Python libraries
+        run: |
+          pip install requests edge-tts moviepy opencv-python-headless numpy pillow
+
+      - name: Generate and assemble video
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
+        run: python medical_video.py
+
+      - name: Upload video artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: medical-writing-video
+          path: final_video.mp4
+          retention-days: 7
