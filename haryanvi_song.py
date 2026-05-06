@@ -1,28 +1,31 @@
-import os, sys, logging, json, random, time, requests, subprocess, asyncio
+import os, sys, logging, json, random, textwrap, requests, subprocess, asyncio
 from pathlib import Path
 import numpy as np
 from moviepy import VideoFileClip, AudioFileClip, CompositeVideoClip, ImageClip
 from PIL import Image, ImageDraw, ImageFont
 
 # ---------- LOGGING ----------
-logging.basicConfig(level=logging.INFO, stream=sys.stdout,
-                    format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO,
+    stream=sys.stdout,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+)
 
 # ---------- API KEYS ----------
 OPENROUTER_API_KEY = os.environ["OPENROUTER_API_KEY"]
-PIXABAY_API_KEY    = os.environ["PIXABAY_API_KEY"]
+PIXABAY_API_KEY = os.environ["PIXABAY_API_KEY"]
 TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 TELEGRAM_CHANNEL_ID = os.environ["TELEGRAM_CHANNEL_ID"]
 
 # ---------- CONFIG ----------
 VIDEO_WIDTH, VIDEO_HEIGHT = 720, 1280
 OUTPUT_FILE = "haryanvi_song.mp4"
-FONT_PATH   = "font.ttf"
+FONT_PATH = "font.ttf"
 
-# Riffusion public endpoint (Hugging Face Spaces)
-RIFFUSION_API = "https://bf.dallemini.ai/generate"   # or any live public instance
+# Pollinations music endpoint (free, no API key required)
+POLLINATIONS_MUSIC_URL = "https://gen.pollinations.ai/audio"
 
-# ─────────────────────────────── 1. LYRICS ───────────────────────────────
+# ─────────────── 1. LYRICS ───────────────
 def generate_lyrics():
     prompt = """You are a talented Haryanvi songwriter. Write a romantic Haryanvi song in Hindi script.
 The song should be about love, villages, fields, and traditional relationships.
@@ -45,48 +48,51 @@ Return the lyrics only, no extra text."""
     logging.info(f"Lyrics generated: {len(lines)} lines")
     return lines, " ".join(lines)
 
-# ─────────────────────────────── 2. SONG (Riffusion – free, no key) ─────
-def generate_riffusion_song(lyrics_text):
-    """Generate a song from lyrics using Riffusion public API."""
-    prompt = f"{lyrics_text} | Haryanvi romantic, Indian folk, soft male vocals, acoustic guitar"
-    payload = {"prompt": prompt}
-    resp = requests.post(RIFFUSION_API, json=payload, timeout=300)
-    if resp.status_code != 200:
-        logging.error(f"Riffusion error {resp.status_code}: {resp.text}")
-        return None
+# ─────────────── 2. SONG (Pollinations – free, no key) ─────────
+def generate_pollinations_song(lyrics_text):
+    """Generate music using Pollinations.ai free API."""
+    # Use the model=elevenmusic for music generation
+    params = {
+        "model": "elevenmusic",
+        "format": "mp3",
+        "duration": 45,              # 45 seconds
+        "instrumental": "false"
+    }
+    # Build query string
+    query_string = "&".join(f"{k}={v}" for k, v in params.items())
+    # URL-encode the lyrics text
+    encoded_text = requests.utils.quote(lyrics_text[:500])
+    url = f"{POLLINATIONS_MUSIC_URL}/{encoded_text}?{query_string}"
 
-    # The response is usually a JSON with an audio file URL or base64
     try:
-        data = resp.json()
-        # Some Riffusion instances return an array of generations
-        if isinstance(data, list):
-            audio_url = data[0].get("audio_url") or data[0].get("url")
-        else:
-            audio_url = data.get("audio_url") or data.get("url")
-        if audio_url and audio_url.startswith("http"):
-            r = requests.get(audio_url, timeout=120)
+        resp = requests.get(url, timeout=180)
+        if resp.status_code == 200 and len(resp.content) > 1000:
             with open("song_audio.mp3", "wb") as f:
-                f.write(r.content)
-            logging.info("Riffusion song downloaded.")
+                f.write(resp.content)
+            logging.info("Pollinations song generated successfully.")
             return "song_audio.mp3"
         else:
-            # Some instances return audio as base64 inside JSON
-            audio_b64 = data.get("audio") or (data[0].get("audio") if isinstance(data, list) else None)
-            if audio_b64:
-                import base64
-                audio_bytes = base64.b64decode(audio_b64)
-                with open("song_audio.mp3", "wb") as f:
-                    f.write(audio_bytes)
-                logging.info("Riffusion song decoded from base64.")
-                return "song_audio.mp3"
-            else:
-                logging.warning("Riffusion response format unknown.")
-                return None
+            logging.warning(f"Pollinations music failed (status {resp.status_code}). Trying fallback.")
+            return None
     except Exception as e:
-        logging.exception("Riffusion parse error")
+        logging.warning(f"Pollinations exception: {e}. Trying fallback.")
         return None
 
-# ─────────────────────────────── 3. STOCK FOOTAGE ────────────────────────
+# ─────────────── 3. FALLBACK TTS (Edge TTS) ───────────────
+async def generate_tts_narration(script_lines):
+    """Fallback: Edge TTS narration with Hindi voice."""
+    full_text = " ".join(script_lines)
+    audio_file = "fallback_audio.mp3"
+    cmd = ["edge-tts", "--text", full_text, "--voice", "hi-IN-SwaraNeural", "--write-media", audio_file]
+    process = await asyncio.create_subprocess_exec(*cmd,
+        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    stdout, stderr = await process.communicate()
+    if process.returncode != 0:
+        raise Exception(f"edge-tts failed: {stderr.decode()}")
+    logging.info("TTS fallback audio generated.")
+    return audio_file
+
+# ─────────────── 4. STOCK FOOTAGE (limited) ───────────────
 def fetch_stock_videos():
     video_paths = []
     search_terms = ["romantic couple village", "haryanvi culture", "Indian wedding couple"]
@@ -111,7 +117,7 @@ def fetch_stock_videos():
                 logging.info(f"Stock {i} downloaded.")
     return video_paths
 
-# ─────────────────────────────── 4. SUBTITLES ────────────────────────────
+# ─────────────── 5. SUBTITLES (pink) ───────────────
 def create_subtitle_image(text, w, h):
     img = Image.new("RGBA", (w, h), (0,0,0,0))
     draw = ImageDraw.Draw(img)
@@ -130,7 +136,7 @@ def create_subtitle_image(text, w, h):
         y += 60
     return np.array(img)
 
-# ─────────────────────────────── 5. VIDEO ASSEMBLY ───────────────────────
+# ─────────────── 6. VIDEO ASSEMBLY ───────────────
 def assemble_video(lines, video_paths, audio_path):
     audio = AudioFileClip(audio_path)
     seg_dur = audio.duration / max(len(lines), 1)
@@ -154,7 +160,7 @@ def assemble_video(lines, video_paths, audio_path):
                           preset="ultrafast", threads=1, bitrate="500k")
     logging.info(f"Video assembled: {OUTPUT_FILE}")
 
-# ─────────────────────────────── 6. TELEGRAM UPLOAD ──────────────────────
+# ─────────────── 7. TELEGRAM UPLOAD ───────────────
 def upload_to_telegram(video_path):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendVideo"
     with open(video_path, "rb") as f:
@@ -166,19 +172,20 @@ def upload_to_telegram(video_path):
     else:
         logging.error(f"Telegram upload failed: {resp.status_code} {resp.text}")
 
-# ─────────────────────────────── MAIN ────────────────────────────────────
+# ─────────────── MAIN ───────────────
 async def main():
     logging.info("=== Haryanvi Romantic Song Generator ===")
     try:
         lines, full_lyrics = generate_lyrics()
-        audio_file = generate_riffusion_song(full_lyrics)
+
+        # Try Pollinations music first
+        audio_file = generate_pollinations_song(full_lyrics)
         if not audio_file:
-            logging.error("Song generation failed. Exiting.")
-            sys.exit(1)
+            # Fallback to TTS narration
+            audio_file = await generate_tts_narration(lines)
 
         video_paths = fetch_stock_videos()
 
-        # Create fallback black video if needed
         if not Path("fallback_black.mp4").exists():
             subprocess.run(["ffmpeg", "-f", "lavfi", "-i",
                             f"color=c=black:s={VIDEO_WIDTH}x{VIDEO_HEIGHT}:d=10",
