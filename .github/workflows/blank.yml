@@ -2,7 +2,7 @@ name: AI Money Machine Daily Run
 
 on:
   schedule:
-    - cron: '0 8 * * *'   # Daily at 08:00 UTC
+    - cron: '0 8 * * *'
   workflow_dispatch:
 
 jobs:
@@ -11,18 +11,15 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
-
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
       - name: Install libraries
         run: pip install requests fpdf2 tweepy
-
       - name: Run the AI Money Machine
         env:
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           GUMROAD_TOKEN: ${{ secrets.GUMROAD_TOKEN }}
           TWITTER_API_KEY: ${{ secrets.TWITTER_API_KEY }}
           TWITTER_API_KEY_SECRET: ${{ secrets.TWITTER_API_KEY_SECRET }}
