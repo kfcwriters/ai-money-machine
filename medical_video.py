@@ -1,26 +1,35 @@
 import os, sys, logging, json, random, textwrap, requests, subprocess, asyncio, time
 from pathlib import Path
 import numpy as np
-from moviepy import VideoFileClip, AudioFileClip, TextClip, CompositeVideoClip, concatenate_videoclips, vfx
-from moviepy.video.tools.subtitles import SubtitlesClip
+from moviepy import (
+    VideoFileClip,
+    AudioFileClip,
+    CompositeVideoClip,
+    ImageClip,
+    concatenate_videoclips,
+    vfx,
+)
 from PIL import Image, ImageDraw, ImageFont
 
 # ---------- LOGGING ----------
-logging.basicConfig(level=logging.INFO, stream=sys.stdout,
-                    format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(
+    level=logging.INFO,
+    stream=sys.stdout,
+    format="%(asctime)s - %(levelname)s - %(message)s",
+)
 
 # ---------- API KEYS ----------
 OPENROUTER_API_KEY = os.environ["OPENROUTER_API_KEY"]
 PIXABAY_API_KEY = os.environ["PIXABAY_API_KEY"]
 TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
-TELEGRAM_CHANNEL_ID = os.environ["TELEGRAM_CHANNEL_ID"]   # @username or numeric ID
+TELEGRAM_CHANNEL_ID = os.environ["TELEGRAM_CHANNEL_ID"]  # @username or numeric ID
 
 # ---------- CONFIG ----------
 VIDEO_WIDTH, VIDEO_HEIGHT = 1080, 1920  # 9:16 vertical for shorts
 OUTPUT_FILE = "final_video.mp4"
-FONT_PATH = "font.ttf"
-VOICE_NAME = "en-US-AriaNeural"          # Natural US female voice
-TARGET_DURATION = 60                     # ~60 seconds
+FONT_PATH = "font.ttf"  # <-- Make sure this file exists in the repo root
+VOICE_NAME = "en-US-AriaNeural"  # Natural US female voice
+TARGET_DURATION = 60             # ~60 seconds
 
 TOPICS = [
     "How to write a medical case report that gets accepted",
@@ -32,6 +41,7 @@ TOPICS = [
     "The importance of editing and proofreading in medical writing",
     "How to write an effective abstract for your research paper",
 ]
+
 
 # ---------- STEP 1: GENERATE SCRIPT ----------
 def generate_script(topic):
@@ -45,14 +55,22 @@ Rules:
 - Do NOT include scene numbers, timestamps, or any formatting. Just the sentences.
 
 Script:"""
-    headers = {"Authorization": f"Bearer {OPENROUTER_API_KEY}", "Content-Type": "application/json"}
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "Content-Type": "application/json",
+    }
     payload = {
         "model": "openrouter/auto",
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.8,
-        "max_tokens": 500
+        "max_tokens": 500,
     }
-    resp = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload, timeout=60)
+    resp = requests.post(
+        "https://openrouter.ai/api/v1/chat/completions",
+        headers=headers,
+        json=payload,
+        timeout=60,
+    )
     if resp.status_code != 200:
         raise Exception(f"OpenRouter error {resp.status_code}: {resp.text}")
     script = resp.json()["choices"][0]["message"]["content"].strip()
@@ -60,17 +78,29 @@ Script:"""
     logging.info(f"Script generated: {len(lines)} lines")
     return lines
 
+
 # ---------- STEP 2: GENERATE VOICEOVER ----------
 async def generate_voiceover(script_lines):
     full_text = " ".join(script_lines)
     audio_file = "voiceover.mp3"
-    cmd = ["edge-tts", "--text", full_text, "--voice", VOICE_NAME, "--write-media", audio_file]
-    process = await asyncio.create_subprocess_exec(*cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE)
+    cmd = [
+        "edge-tts",
+        "--text",
+        full_text,
+        "--voice",
+        VOICE_NAME,
+        "--write-media",
+        audio_file,
+    ]
+    process = await asyncio.create_subprocess_exec(
+        *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
+    )
     stdout, stderr = await process.communicate()
     if process.returncode != 0:
         raise Exception(f"edge-tts failed: {stderr.decode()}")
     logging.info("Voiceover generated.")
     return audio_file
+
 
 # ---------- STEP 3: FETCH STOCK FOOTAGE ----------
 def fetch_stock_videos(script_lines):
@@ -108,7 +138,10 @@ def fetch_stock_videos(script_lines):
                 if fhits:
                     fbest = fhits[0]
                     videos = fbest.get("videos", {})
-                    fvurl = videos.get("large", {}).get("url") or videos.get("medium", {}).get("url")
+                    fvurl = (
+                        videos.get("large", {}).get("url")
+                        or videos.get("medium", {}).get("url")
+                    )
                     if fvurl:
                         local_path = f"stock_{i}.mp4"
                         vresp = requests.get(fvurl, timeout=60)
@@ -119,13 +152,15 @@ def fetch_stock_videos(script_lines):
     logging.info(f"Downloaded {len(video_paths)} stock clips.")
     return video_paths
 
+
 # ---------- STEP 4: CREATE SUBTITLE IMAGE ----------
 def create_subtitle_image(text, width, height):
     img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
     try:
         font = ImageFont.truetype(FONT_PATH, 52)
-    except:
+    except Exception:
+        logging.warning("Bold font not found, using default.")
         font = ImageFont.load_default()
     wrapped = textwrap.wrap(text, width=25)
     y_offset = height - (len(wrapped) * 70) - 80
@@ -139,6 +174,7 @@ def create_subtitle_image(text, width, height):
         y_offset += 70
     arr = np.array(img)
     return arr
+
 
 # ---------- STEP 5: ASSEMBLE VIDEO ----------
 def assemble_video(script_lines, video_paths, audio_path):
@@ -154,7 +190,11 @@ def assemble_video(script_lines, video_paths, audio_path):
             if vclip.w > VIDEO_WIDTH:
                 vclip = vclip.with_position("center")
         else:
-            vclip = VideoFileClip("fallback_black.mp4").without_audio().resized(new_size=(VIDEO_WIDTH, VIDEO_HEIGHT))
+            vclip = (
+                VideoFileClip("fallback_black.mp4")
+                .without_audio()
+                .resized(new_size=(VIDEO_WIDTH, VIDEO_HEIGHT))
+            )
 
         vclip = vclip.with_duration(segment_duration)
         if vclip.duration < segment_duration:
@@ -169,21 +209,32 @@ def assemble_video(script_lines, video_paths, audio_path):
 
     final = CompositeVideoClip(clips)
     final.audio = audio
-    final.write_videofile(OUTPUT_FILE, fps=24, codec="libx264", audio_codec="aac",
-                          preset="ultrafast", threads=2)
+    final.write_videofile(
+        OUTPUT_FILE,
+        fps=24,
+        codec="libx264",
+        audio_codec="aac",
+        preset="ultrafast",
+        threads=2,
+    )
     logging.info(f"Video saved to {OUTPUT_FILE}")
+
 
 # ---------- STEP 6: UPLOAD TO TELEGRAM ----------
 def upload_to_telegram(video_path):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendVideo"
     with open(video_path, "rb") as f:
         files = {"video": f}
-        data = {"chat_id": TELEGRAM_CHANNEL_ID, "caption": "📹 New daily medical writing video is ready!"}
+        data = {
+            "chat_id": TELEGRAM_CHANNEL_ID,
+            "caption": "📹 New daily medical writing video is ready!",
+        }
         resp = requests.post(url, data=data, files=files, timeout=60)
     if resp.status_code == 200:
         logging.info("Video posted to Telegram channel!")
     else:
         logging.error(f"Telegram upload failed: {resp.status_code} {resp.text}")
+
 
 # ---------- MAIN ----------
 async def main():
@@ -197,8 +248,21 @@ async def main():
         videos = fetch_stock_videos(script)
 
         if not Path("fallback_black.mp4").exists():
-            subprocess.run(["ffmpeg", "-f", "lavfi", "-i", f"color=c=black:s={VIDEO_WIDTH}x{VIDEO_HEIGHT}:d=10",
-                            "-c:v", "libx264", "-t", "10", "fallback_black.mp4"], check=True)
+            subprocess.run(
+                [
+                    "ffmpeg",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    f"color=c=black:s={VIDEO_WIDTH}x{VIDEO_HEIGHT}:d=10",
+                    "-c:v",
+                    "libx264",
+                    "-t",
+                    "10",
+                    "fallback_black.mp4",
+                ],
+                check=True,
+            )
 
         assemble_video(script, videos, audio)
 
@@ -209,6 +273,7 @@ async def main():
     except Exception as e:
         logging.exception("Fatal error")
         sys.exit(1)
+
 
 if __name__ == "__main__":
     asyncio.run(main())
