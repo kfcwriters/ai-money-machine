@@ -24,11 +24,11 @@ def llm_generate(prompt):
     url = "https://openrouter.ai/api/v1/chat/completions"
     headers = {
         "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "HTTP-Referer": "https://github.com",       # optional, can be anything
+        "HTTP-Referer": "https://github.com",
         "Content-Type": "application/json"
     }
     payload = {
-        "model": "meta-llama/llama-3-8b-instruct:free",
+        "model": "openrouter/auto",           # <-- fixed
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.8,
         "max_tokens": 2048
