@@ -3,7 +3,7 @@ import os, sys, logging, requests, json, random
 logging.basicConfig(level=logging.INFO, stream=sys.stdout,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 
-GROQ_API_KEY = os.environ["GROQ_API_KEY"]
+OPENROUTER_API_KEY = os.environ["OPENROUTER_API_KEY"]
 DEVTO_API_KEY = os.environ["DEVTO_API_KEY"]
 HIRE_ME_URL = os.environ["HIRE_ME_URL_NUTRITION"]   # NutriAid Carrd page
 
@@ -14,24 +14,30 @@ KEYWORDS = [
     "hypertension diet plan",
     "thyroid diet recommendations",
     "insulin resistance meal planning",
-    "renal diet for kidney health",
+    "renal diet for kidney disease",
     "gout diet foods to avoid",
     "anti-inflammatory foods list",
     "balanced diet for metabolic syndrome"
 ]
 
 def llm_generate(prompt):
-    headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
-    payload = {
-        "model": "llama-3.3-70b-versatile",
-        "messages": [{"role":"user","content":prompt}],
-        "temperature":0.8,
-        "max_completion_tokens":2048
+    url = "https://openrouter.ai/api/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "HTTP-Referer": "https://github.com",
+        "Content-Type": "application/json"
     }
-    resp = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload, timeout=60)
-    if resp.status_code == 200:
-        return resp.json()["choices"][0]["message"]["content"]
-    raise Exception(f"Groq error {resp.status_code}: {resp.text}")
+    payload = {
+        "model": "openrouter/auto",
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.8,
+        "max_tokens": 2048
+    }
+    resp = requests.post(url, headers=headers, json=payload, timeout=60)
+    if resp.status_code != 200:
+        raise Exception(f"OpenRouter error {resp.status_code}: {resp.text}")
+    result = resp.json()
+    return result["choices"][0]["message"]["content"]
 
 keyword = random.choice(KEYWORDS)
 title_prompt = f"Generate a catchy, SEO-optimized blog title targeting the keyword '{keyword}'. Return only the title."
@@ -54,10 +60,7 @@ payload = {
         "tags": ["nutrition", "diet", "health"]
     }
 }
-headers = {
-    "Content-Type": "application/json",
-    "api-key": DEVTO_API_KEY
-}
+headers = {"Content-Type": "application/json", "api-key": DEVTO_API_KEY}
 resp = requests.post("https://dev.to/api/articles", headers=headers, json=payload)
 
 if resp.status_code == 201:
