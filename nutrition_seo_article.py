@@ -23,10 +23,10 @@ KEYWORDS = [
 def llm_generate(prompt):
     headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
     payload = {
-        "model": "mixtral-8x7b-32768",
+        "model": "llama-3.3-70b-versatile",
         "messages": [{"role":"user","content":prompt}],
         "temperature":0.8,
-        "max_tokens":2048
+        "max_completion_tokens":2048
     }
     resp = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload, timeout=60)
     if resp.status_code == 200:
