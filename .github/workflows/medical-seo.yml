@@ -1,8 +1,8 @@
-name: Weekly Medical SEO Article
+name: Daily Medical SEO Article
 
 on:
   schedule:
-    - cron: '0 16 * * *'   # Daily at 16:00 UTC
+    - cron: '0 16 * * *'
   workflow_dispatch:
 
 jobs:
@@ -19,8 +19,7 @@ jobs:
         run: pip install requests
       - name: Publish article
         env:
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          HASKNODE_TOKEN: ${{ secrets.HASKNODE_TOKEN }}
-          HASKNODE_PUBLICATION_ID: ${{ secrets.HASKNODE_PUBLICATION_ID }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          DEVTO_API_KEY: ${{ secrets.DEVTO_API_KEY }}
           HIRE_ME_URL: ${{ secrets.HIRE_ME_URL }}
         run: python medical_seo_article.py
