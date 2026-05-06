@@ -3,7 +3,7 @@ name: Daily Haryanvi Romantic Song
 on:
   schedule:
     - cron: '0 6 * * *'   # Daily at 06:00 UTC (11:30 AM IST)
-  workflow_dispatch:        # Manual trigger
+  workflow_dispatch:
 
 jobs:
   create-video:
