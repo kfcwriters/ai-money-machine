@@ -21,7 +21,7 @@ TELEGRAM_CHANNEL_ID = os.environ["TELEGRAM_CHANNEL_ID"]
 VIDEO_WIDTH, VIDEO_HEIGHT = 1080, 1920
 OUTPUT_FILE = "haryanvi_song.mp4"
 FONT_PATH = "font.ttf"
-VOICE_NAME = "hi-IN-Madhur"                 # Hindi female TTS (romantic feel)
+VOICE_NAME = "hi-IN-SwaraNeural"                 # ✅ Correct Hindi female voice
 SUNO_API_BASE = "https://suno-api.vercel.app"
 
 # ─────────────────────────────── 1. LYRICS ───────────────────────────────
