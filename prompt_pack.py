@@ -4,7 +4,7 @@ from fpdf import FPDF
 logging.basicConfig(level=logging.INFO, stream=sys.stdout,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 
-GROQ_API_KEY = os.environ["GROQ_API_KEY"]
+OPENROUTER_API_KEY = os.environ["OPENROUTER_API_KEY"]
 GUMROAD_TOKEN = os.environ["GUMROAD_TOKEN"]
 
 def generate_prompts():
@@ -25,12 +25,23 @@ Format each prompt as:
 **Prompt**: <the full ChatGPT prompt>
 
 Return them as a numbered list, with clear separation between each. Do not add extra commentary."""
-    headers = {"Authorization": f"Bearer {GROQ_API_KEY}", "Content-Type": "application/json"}
-    payload = {"model": "llama-3.3-70b-versatile", "messages": [{"role":"user","content":prompt}], "temperature":0.8, "max_completion_tokens":2048}
-    resp = requests.post("https://api.groq.com/openai/v1/chat/completions", headers=headers, json=payload, timeout=60)
-    if resp.status_code == 200:
-        return resp.json()["choices"][0]["message"]["content"]
-    raise Exception(f"Groq error {resp.status_code}")
+    url = "https://openrouter.ai/api/v1/chat/completions"
+    headers = {
+        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+        "HTTP-Referer": "https://github.com",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "model": "openrouter/auto",
+        "messages": [{"role":"user","content":prompt}],
+        "temperature":0.8,
+        "max_tokens":2048
+    }
+    resp = requests.post(url, headers=headers, json=payload, timeout=60)
+    if resp.status_code != 200:
+        raise Exception(f"OpenRouter error {resp.status_code}: {resp.text}")
+    result = resp.json()
+    return result["choices"][0]["message"]["content"]
 
 def create_pdf(content):
     pdf = FPDF()
@@ -38,30 +49,25 @@ def create_pdf(content):
     pdf.set_auto_page_break(auto=True, margin=15)
     pdf.add_font("DejaVu", "", "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", uni=True)
     pdf.add_font("DejaVu", "B", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf", uni=True)
-
     pdf.set_font("DejaVu", "B", 16)
     pdf.cell(0, 10, "Medical & Academic Writing – Prompt Pack", new_x="LMARGIN", new_y="NEXT", align="C")
     pdf.ln(8)
     pdf.set_font("DejaVu", "", 11)
-    # Use safe multi_cell only for short intro text
     intro = "10 powerful ChatGPT prompts to accelerate your research and writing workflow."
     for intro_chunk in textwrap.wrap(intro, width=90):
         pdf.cell(0, 6, intro_chunk, new_x="LMARGIN", new_y="NEXT")
     pdf.ln(6)
-
     pdf.set_font("DejaVu", "", 11)
     max_chars = 90
     for line in content.split("\n"):
         line = line.strip()
         if not line:
             continue
-        # Bold for titles
         if line.startswith("**") and line.endswith("**"):
             pdf.set_font("DejaVu", "B", 11)
             pdf.cell(0, 6, line.strip("*"), new_x="LMARGIN", new_y="NEXT")
             pdf.set_font("DejaVu", "", 11)
         else:
-            # Break long lines safely
             for chunk in textwrap.wrap(line, width=max_chars):
                 pdf.cell(0, 6, chunk, new_x="LMARGIN", new_y="NEXT")
     pdf.output("prompt_pack.pdf")
@@ -80,7 +86,6 @@ def publish_to_gumroad(pdf_path):
     product_id = resp.json()["product"]["id"]
     short_url = resp.json()["product"].get("short_url", "no-url")
     logging.info(f"Product created: {short_url}")
-
     upload_url = f"https://api.gumroad.com/v2/products/{product_id}/variant_files"
     with open(pdf_path, "rb") as f:
         files = {"file": ("PromptPack.pdf", f, "application/pdf")}
