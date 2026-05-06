@@ -3,7 +3,7 @@ name: Daily YouTube Short
 on:
   schedule:
     - cron: '0 7 * * *'   # Daily 07:00 UTC
-  workflow_dispatch:
+  workflow_dispatch:        # Manual trigger
 
 jobs:
   create-short:
@@ -11,19 +11,26 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Install dependencies
+
+      - name: Install system dependencies
         run: |
           sudo apt-get update
           sudo apt-get install -y ffmpeg imagemagick
+
+      - name: Install Python libraries
+        run: |
           pip install requests edge-tts moviepy pillow google-auth google-auth-httplib2 google-auth-oauthlib google-api-python-client opencv-python-headless numpy
+
       - name: Generate and upload short
         env:
           YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
           YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
           YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          PIXABAY_API_KEY: ${{ secrets.PIXABAY_API_KEY }}
         run: python youtube_short.py
