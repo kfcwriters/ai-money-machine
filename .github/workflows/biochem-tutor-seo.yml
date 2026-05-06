@@ -20,7 +20,6 @@ jobs:
       - name: Publish article
         env:
           GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          HASKNODE_TOKEN: ${{ secrets.HASKNODE_TOKEN_BIOCHEM }}
-          HASKNODE_PUBLICATION_ID: ${{ secrets.HASKNODE_PUBLICATION_ID_BIOCHEM }}
+          DEVTO_API_KEY: ${{ secrets.DEVTO_API_KEY }}
           HIRE_ME_URL: ${{ secrets.HIRE_ME_URL_BIOCHEM }}
         run: python biochem_tutor_seo.py
