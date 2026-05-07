@@ -1,0 +1,25 @@
+name: Weekly Medical Writing Newsletter
+
+on:
+  schedule:
+    - cron: '0 14 * * 0'   # Every Sunday 14:00 UTC
+  workflow_dispatch:
+
+jobs:
+  send-newsletter:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install libraries
+        run: pip install requests
+      - name: Compile and send newsletter
+        env:
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          BUTTONDOWN_API_KEY: ${{ secrets.BUTTONDOWN_API_KEY }}
+          HIRE_ME_URL: ${{ secrets.HIRE_ME_URL }}
+        run: python newsletter.py
