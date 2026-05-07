@@ -60,7 +60,7 @@ def publish_to_gumroad(title, pdf_path):
         "name": title,
         "description": f"A practical, 10‑step {title.lower()} to save you time and mistakes. Instant PDF download.",
         "price": "399",
-        "published": "true",
+        "published": True,
     }
     resp = requests.post("https://api.gumroad.com/v2/products", headers=headers, data=data, timeout=30)
     if resp.status_code != 200 or not resp.json().get("success"):
