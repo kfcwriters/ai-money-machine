@@ -18,7 +18,6 @@ SENT_LOG = ".sent_emails_log.json"
 MAX_EMAILS_PER_DAY = 5
 
 def get_access_token():
-    """Use the refresh token to obtain a fresh access token."""
     resp = requests.post("https://oauth2.googleapis.com/token", data={
         "client_id": GMAIL_CLIENT_ID,
         "client_secret": GMAIL_CLIENT_SECRET,
@@ -98,17 +97,15 @@ Rules:
     return None
 
 def send_email_via_gmail_api(to_email, subject, html_body):
-    """Send email using the Gmail API (no SMTP, no App Password)."""
     token = get_access_token()
     msg = EmailMessage()
     msg["From"] = f"KFC - Knowledge Framework Consulting <{YOUR_EMAIL}>"
     msg["To"] = to_email
-    msg["Bcc"] = YOUR_EMAIL
+    # BCC removed – no copy to your inbox
     msg["Subject"] = subject
     msg.set_content("Please view this email in HTML format.")
     msg.add_alternative(html_body, subtype="html")
 
-    # Encode the message in base64url format
     raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
     url = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send"
     headers = {
