@@ -1,4 +1,4 @@
-import os, sys, logging, requests
+import os, sys, logging, requests, random
 from fpdf import FPDF
 
 logging.basicConfig(level=logging.INFO, stream=sys.stdout,
@@ -19,7 +19,6 @@ TOPICS = [
 ]
 
 def generate_checklist():
-    import random
     topic = random.choice(TOPICS)
     prompt = f"""You are a medical writing expert. Create a practical, actionable 1‑page checklist titled "{topic}".
 
@@ -60,14 +59,17 @@ def publish_to_gumroad(title, pdf_path):
         "name": title,
         "description": f"A practical, 10‑step {title.lower()} to save you time and mistakes. Instant PDF download.",
         "price": "399",
-        "published": True,
+        "published": True,   # <-- boolean, not string
     }
     resp = requests.post("https://api.gumroad.com/v2/products", headers=headers, data=data, timeout=30)
     if resp.status_code != 200 or not resp.json().get("success"):
         raise Exception(f"Gumroad product creation failed: {resp.text}")
+
     product_id = resp.json()["product"]["id"]
     short_url = resp.json()["product"].get("short_url", "no-url")
     logging.info(f"Product created: {short_url}")
+
+    # Upload the file (required for digital products)
     upload_url = f"https://api.gumroad.com/v2/products/{product_id}/variant_files"
     with open(pdf_path, "rb") as f:
         files = {"file": ("checklist.pdf", f, "application/pdf")}
@@ -75,7 +77,11 @@ def publish_to_gumroad(title, pdf_path):
     if resp2.status_code != 200:
         logging.warning(f"File upload failed: {resp2.text}")
     else:
-        logging.info("Checklist published successfully!")
+        logging.info("File uploaded successfully.")
+
+    # Extra safety: explicitly set product as published (in case it was ignored)
+    publish_url = f"https://api.gumroad.com/v2/products/{product_id}"
+    requests.put(publish_url, headers=headers, data={"published": True})
 
 def main():
     logging.info("=== Weekly Checklist Generator ===")
