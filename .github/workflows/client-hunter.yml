@@ -2,8 +2,8 @@ name: Daily Client Hunter
 
 on:
   schedule:
-    - cron: '0 11 * * *'
-  workflow_dispatch:
+    - cron: '0 11 * * *'   # Daily 11:00 UTC
+  workflow_dispatch:        # Manual trigger
 
 jobs:
   hunt:
@@ -23,5 +23,7 @@ jobs:
           MINELEAD_API_KEY: ${{ secrets.MINELEAD_API_KEY }}
           OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           YOUR_EMAIL: ${{ secrets.YOUR_EMAIL }}
-          GMAIL_APP_PASSWORD: ${{ secrets.GMAIL_APP_PASSWORD }}
+          GMAIL_CLIENT_ID: ${{ secrets.GMAIL_CLIENT_ID }}
+          GMAIL_CLIENT_SECRET: ${{ secrets.GMAIL_CLIENT_SECRET }}
+          GMAIL_REFRESH_TOKEN: ${{ secrets.GMAIL_REFRESH_TOKEN }}
         run: python client_hunter.py
