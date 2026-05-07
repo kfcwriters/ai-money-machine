@@ -1,0 +1,27 @@
+name: Daily Client Hunter
+
+on:
+  schedule:
+    - cron: '0 11 * * *'   # Daily 11:00 UTC
+  workflow_dispatch:        # Manual trigger
+
+jobs:
+  hunt:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install libraries
+        run: pip install requests
+      - name: Hunt clients
+        env:
+          SERPER_API_KEY: ${{ secrets.SERPER_API_KEY }}
+          MINELEAD_API_KEY: ${{ secrets.MINELEAD_API_KEY }}
+          BREVO_API_KEY: ${{ secrets.BREVO_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          YOUR_EMAIL: ${{ secrets.YOUR_EMAIL }}
+        run: python client_hunter.py
