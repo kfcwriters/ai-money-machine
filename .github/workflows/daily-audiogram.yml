@@ -1,0 +1,35 @@
+name: Daily Audiogram
+
+on:
+  schedule:
+    - cron: '0 17 * * *'   # Daily 17:00 UTC (10:30 PM IST)
+  workflow_dispatch:
+
+jobs:
+  create-audiogram:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ffmpeg imagemagick
+
+      - name: Install Python libraries
+        run: |
+          pip install requests edge-tts moviepy pillow google-auth google-auth-httplib2 google-auth-oauthlib google-api-python-client
+
+      - name: Generate and upload audiogram
+        env:
+          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+          YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+          YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+        run: python daily_audiogram.py
