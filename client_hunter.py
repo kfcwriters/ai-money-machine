@@ -1,15 +1,16 @@
-import os, sys, logging, json, requests, time
+import os, sys, logging, json, requests, time, smtplib
 from pathlib import Path
 from urllib.parse import urlparse
+from email.message import EmailMessage
 
 logging.basicConfig(level=logging.INFO, stream=sys.stdout,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 
 SERPER_API_KEY = os.environ["SERPER_API_KEY"]
 MINELEAD_API_KEY = os.environ["MINELEAD_API_KEY"]
-BREVO_API_KEY = os.environ["BREVO_API_KEY"]
 OPENROUTER_API_KEY = os.environ["OPENROUTER_API_KEY"]
 YOUR_EMAIL = os.environ["YOUR_EMAIL"]
+GMAIL_APP_PASSWORD = os.environ["GMAIL_APP_PASSWORD"]
 
 SENT_LOG = ".sent_emails_log.json"
 MAX_EMAILS_PER_DAY = 5
@@ -82,23 +83,21 @@ Rules:
         return resp.json()["choices"][0]["message"]["content"].strip()
     return None
 
-def send_email_via_brevo(to_email, subject, html_body):
-    url = "https://api.brevo.com/v3/smtp/email"
-    headers = {"api-key": BREVO_API_KEY, "Content-Type": "application/json"}
-    payload = {
-        "sender": {"email": YOUR_EMAIL, "name": "KFC - Knowledge Framework Consulting"},
-        "to": [{"email": to_email}],
-        "bcc": [{"email": YOUR_EMAIL}],
-        "subject": subject,
-        "htmlContent": html_body
-    }
-    resp = requests.post(url, headers=headers, json=payload, timeout=30)
-    if resp.status_code == 201:
-        logging.info(f"Email sent to {to_email}")
-        return True
-    else:
-        logging.error(f"Brevo error: {resp.status_code} {resp.text}")
-        return False
+def send_email_via_gmail(to_email, subject, html_body):
+    msg = EmailMessage()
+    msg["From"] = f"KFC - Knowledge Framework Consulting <{YOUR_EMAIL}>"
+    msg["To"] = to_email
+    msg["Bcc"] = YOUR_EMAIL
+    msg["Subject"] = subject
+    msg.set_content("Please view this email in HTML format.")
+    msg.add_alternative(html_body, subtype="html")
+
+    with smtplib.SMTP("smtp.gmail.com", 587) as server:
+        server.starttls()
+        server.login(YOUR_EMAIL, GMAIL_APP_PASSWORD)
+        server.send_message(msg)
+    logging.info(f"Email sent to {to_email}")
+    return True
 
 def main():
     logging.info("=== Daily Client Hunter ===")
@@ -140,10 +139,10 @@ def main():
             </p>
         </div>
         """
-        if send_email_via_brevo(email_addr, "Medical writing support for your team", html):
-            sent[domain] = True
-            sent_count += 1
-            time.sleep(3)
+        send_email_via_gmail(email_addr, "Medical writing support for your team", html)
+        sent[domain] = True
+        sent_count += 1
+        time.sleep(3)
         if sent_count >= MAX_EMAILS_PER_DAY:
             break
 
