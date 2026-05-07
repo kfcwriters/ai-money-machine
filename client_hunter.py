@@ -15,7 +15,7 @@ GMAIL_CLIENT_SECRET = os.environ["GMAIL_CLIENT_SECRET"]
 GMAIL_REFRESH_TOKEN = os.environ["GMAIL_REFRESH_TOKEN"]
 
 SENT_LOG = ".sent_emails_log.json"
-MAX_EMAILS_PER_DAY = 5
+MAX_EMAILS_PER_DAY = 10
 
 def get_access_token():
     resp = requests.post("https://oauth2.googleapis.com/token", data={
