@@ -1,4 +1,4 @@
-import os, sys, logging, json, requests, time, smtplib
+import os, sys, logging, json, requests, time, base64
 from pathlib import Path
 from urllib.parse import urlparse
 from email.message import EmailMessage
@@ -10,10 +10,24 @@ SERPER_API_KEY = os.environ["SERPER_API_KEY"]
 MINELEAD_API_KEY = os.environ["MINELEAD_API_KEY"]
 OPENROUTER_API_KEY = os.environ["OPENROUTER_API_KEY"]
 YOUR_EMAIL = os.environ["YOUR_EMAIL"]
-GMAIL_APP_PASSWORD = os.environ["GMAIL_APP_PASSWORD"]
+GMAIL_CLIENT_ID = os.environ["GMAIL_CLIENT_ID"]
+GMAIL_CLIENT_SECRET = os.environ["GMAIL_CLIENT_SECRET"]
+GMAIL_REFRESH_TOKEN = os.environ["GMAIL_REFRESH_TOKEN"]
 
 SENT_LOG = ".sent_emails_log.json"
 MAX_EMAILS_PER_DAY = 5
+
+def get_access_token():
+    """Use the refresh token to obtain a fresh access token."""
+    resp = requests.post("https://oauth2.googleapis.com/token", data={
+        "client_id": GMAIL_CLIENT_ID,
+        "client_secret": GMAIL_CLIENT_SECRET,
+        "refresh_token": GMAIL_REFRESH_TOKEN,
+        "grant_type": "refresh_token"
+    })
+    if resp.status_code != 200:
+        raise Exception(f"Failed to get access token: {resp.text}")
+    return resp.json()["access_token"]
 
 def search_leads():
     queries = [
@@ -83,7 +97,9 @@ Rules:
         return resp.json()["choices"][0]["message"]["content"].strip()
     return None
 
-def send_email_via_gmail(to_email, subject, html_body):
+def send_email_via_gmail_api(to_email, subject, html_body):
+    """Send email using the Gmail API (no SMTP, no App Password)."""
+    token = get_access_token()
     msg = EmailMessage()
     msg["From"] = f"KFC - Knowledge Framework Consulting <{YOUR_EMAIL}>"
     msg["To"] = to_email
@@ -92,12 +108,20 @@ def send_email_via_gmail(to_email, subject, html_body):
     msg.set_content("Please view this email in HTML format.")
     msg.add_alternative(html_body, subtype="html")
 
-    with smtplib.SMTP("smtp.gmail.com", 587) as server:
-        server.starttls()
-        server.login(YOUR_EMAIL, GMAIL_APP_PASSWORD)
-        server.send_message(msg)
-    logging.info(f"Email sent to {to_email}")
-    return True
+    # Encode the message in base64url format
+    raw = base64.urlsafe_b64encode(msg.as_bytes()).decode()
+    url = "https://gmail.googleapis.com/gmail/v1/users/me/messages/send"
+    headers = {
+        "Authorization": f"Bearer {token}",
+        "Content-Type": "application/json"
+    }
+    resp = requests.post(url, headers=headers, json={"raw": raw})
+    if resp.status_code == 200:
+        logging.info(f"Email sent to {to_email}")
+        return True
+    else:
+        logging.error(f"Gmail API error: {resp.status_code} {resp.text}")
+        return False
 
 def main():
     logging.info("=== Daily Client Hunter ===")
@@ -139,7 +163,7 @@ def main():
             </p>
         </div>
         """
-        send_email_via_gmail(email_addr, "Medical writing support for your team", html)
+        send_email_via_gmail_api(email_addr, "Medical writing support for your team", html)
         sent[domain] = True
         sent_count += 1
         time.sleep(3)
