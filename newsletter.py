@@ -55,19 +55,27 @@ def send_to_buttondown(subject, body_html):
         "Authorization": f"Token {BUTTONDOWN_API_KEY}",
         "Content-Type": "application/json"
     }
-    # Schedule for 1 minute in the future – Buttondown sends it immediately
-    send_time = (datetime.utcnow() + timedelta(minutes=1)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    # 1. Create draft
     payload = {
         "subject": subject,
         "body": body_html,
-        "status": "scheduled",
-        "scheduled_at": send_time
+        "status": "draft"
     }
     resp = requests.post(url, headers=headers, json=payload, timeout=30)
-    if resp.status_code == 201:
-        logging.info("Newsletter scheduled (will send within 1 minute).")
+    if resp.status_code != 201:
+        logging.error(f"Buttondown draft creation failed: {resp.status_code} {resp.text}")
+        return
+
+    email_id = resp.json()["id"]
+    logging.info(f"Draft created: {email_id}")
+
+    # 2. Publish immediately
+    publish_url = f"https://api.buttondown.email/v1/emails/{email_id}/publish"
+    pub_resp = requests.post(publish_url, headers=headers, timeout=30)
+    if pub_resp.status_code == 200:
+        logging.info("Newsletter published successfully!")
     else:
-        logging.error(f"Buttondown API error: {resp.status_code} {resp.text}")
+        logging.error(f"Publish failed: {pub_resp.status_code} {pub_resp.text}")
 
 def main():
     logging.info("=== Weekly Newsletter ===")
