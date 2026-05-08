@@ -17,8 +17,8 @@ CLIENT_ID = os.environ["YOUTUBE_CLIENT_ID"]
 CLIENT_SECRET = os.environ["YOUTUBE_CLIENT_SECRET"]
 REFRESH_TOKEN = os.environ["YOUTUBE_REFRESH_TOKEN"]
 FONT_PATH = "font.ttf"
-WEBSITE_REPO_TOKEN = os.environ["WEBSITE_REPO_TOKEN"]   # for pushing to website repo
-YOUR_EMAIL = os.environ["YOUR_EMAIL"]   # Gmail address (for Gmail API if needed later, but not used for podcast)
+WEBSITE_REPO_TOKEN = os.environ["WEBSITE_REPO_TOKEN"]
+YOUR_EMAIL = os.environ["YOUR_EMAIL"]
 GMAIL_CLIENT_ID = os.environ["GMAIL_CLIENT_ID"]
 GMAIL_CLIENT_SECRET = os.environ["GMAIL_CLIENT_SECRET"]
 GMAIL_REFRESH_TOKEN = os.environ["GMAIL_REFRESH_TOKEN"]
@@ -36,14 +36,13 @@ RSS_FILE = "podcast.xml"
 PODCAST_TITLE = "KFC Medical Writing Tips"
 PODCAST_DESCRIPTION = "Daily medical writing tips, tools, and strategies for researchers and clinicians."
 PODCAST_LINK = "https://kfcwriters.github.io"
-PODCAST_IMAGE_URL = "https://kfcwriters.github.io/logo.png"  # reuse your website logo
+PODCAST_IMAGE_URL = "https://kfcwriters.github.io/logo.png"
 PODCAST_AUTHOR = "KFC - Knowledge Framework Consulting"
 PODCAST_EMAIL = "kfcwriters@gmail.com"
 PODCAST_EXPLICIT = "no"
 PODCAST_LANGUAGE = "en-us"
 
 def github_put(api_url, payload, token=WEBSITE_REPO_TOKEN):
-    """PUT request with proper headers."""
     headers = {
         "Authorization": f"token {token}",
         "Accept": "application/vnd.github.v3+json",
@@ -55,8 +54,6 @@ def github_get(api_url, token=WEBSITE_REPO_TOKEN):
     return requests.get(api_url, headers=headers, timeout=30)
 
 def upload_file_to_website(local_path, remote_path, commit_message):
-    """Upload a file to the website repo using the GitHub Content API."""
-    # Get current file sha if exists
     get_url = f"{GITHUB_API}/repos/{WEBSITE_REPO}/contents/{remote_path}"
     resp = github_get(get_url)
     sha = None
@@ -82,18 +79,15 @@ def upload_file_to_website(local_path, remote_path, commit_message):
         logging.error(f"Failed to upload {remote_path}: {put_resp.status_code} {put_resp.text}")
 
 def get_existing_rss():
-    """Download the existing RSS feed from the website repo, or return None."""
     get_url = f"{GITHUB_API}/repos/{WEBSITE_REPO}/contents/{RSS_FILE}"
     resp = github_get(get_url)
     if resp.status_code == 200:
-        import base64 as b64
         content = resp.json().get("content", "")
         if content:
-            return b64.b64decode(content).decode("utf-8")
+            return base64.b64decode(content).decode("utf-8")
     return None
 
 def create_new_rss():
-    """Create a new RSS 2.0 feed (iTunes compatible) with no items."""
     rss = f"""<?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0" xmlns:itunes="http://www.itunes.com/dtds/podcast-1.0.dtd" xmlns:content="http://purl.org/rss/1.0/modules/content/">
   <channel>
@@ -115,45 +109,38 @@ def create_new_rss():
 </rss>"""
     return rss
 
-def add_episode_to_rss(rss_str, title, description, audio_url, pub_date, duration):
-    """Add a new item to the RSS feed string. Returns updated RSS string."""
+def add_episode_to_rss(rss_str, title, description, audio_url, pub_date, duration_str):
     item = f"""
   <item>
     <title>{title}</title>
+    <link>{audio_url}</link>
     <description>{description}</description>
     <enclosure url="{audio_url}" length="0" type="audio/mpeg"/>
+    <guid isPermaLink="true">{audio_url}</guid>
     <pubDate>{pub_date}</pubDate>
-    <itunes:duration>{duration}</itunes:duration>
+    <itunes:duration>{duration_str}</itunes:duration>
     <itunes:explicit>no</itunes:explicit>
   </item>
 """
-    # Insert before </channel>
     return rss_str.replace("</channel>", item + "</channel>")
 
 def update_podcast_feed(audio_filename, title, description, duration_seconds):
-    """Update the podcast.xml on the website repo with a new episode."""
-    # 1. Get existing feed or create new
     rss = get_existing_rss()
     if rss is None:
         rss = create_new_rss()
 
-    # 2. Determine audio public URL
     audio_url = f"https://kfcwriters.github.io/{AUDIO_FOLDER}/{audio_filename}"
 
-    # 3. Format pub date in RFC 2822
     now = datetime.datetime.utcnow()
     pub_date = now.strftime("%a, %d %b %Y %H:%M:%S +0000")
 
-    # 4. Format duration as HH:MM:SS
     hours = duration_seconds // 3600
     minutes = (duration_seconds % 3600) // 60
     seconds = duration_seconds % 60
     duration_str = f"{hours:02d}:{minutes:02d}:{seconds:02d}"
 
-    # 5. Add episode
     updated_rss = add_episode_to_rss(rss, title, description, audio_url, pub_date, duration_str)
 
-    # 6. Upload updated RSS to website repo
     with open("temp_rss.xml", "w", encoding="utf-8") as f:
         f.write(updated_rss)
     upload_file_to_website("temp_rss.xml", RSS_FILE, f"Add new podcast episode: {title}")
@@ -250,13 +237,10 @@ async def main():
         duration = create_video(bg, audio_path)
         upload_to_youtube(OUTPUT_FILE, f"{title} – Audiogram", f"{summary}\n\nRead more: {url}\n\nVisit: https://kfcwriters.github.io")
 
-        # ─── Podcast Feed Automation ───
-        # Upload MP3 to website
         today_str = datetime.datetime.utcnow().strftime("%Y-%m-%d")
         audio_filename = f"episode-{today_str}.mp3"
         upload_file_to_website(audio_path, f"{AUDIO_FOLDER}/{audio_filename}", f"Add daily audiogram audio: {audio_filename}")
 
-        # Update RSS feed
         episode_description = f"{summary}\n\nRead the full article: {url}\n\nVisit: https://kfcwriters.github.io"
         update_podcast_feed(audio_filename, title, episode_description, int(duration))
 
