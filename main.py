@@ -3,8 +3,9 @@ from fpdf import FPDF
 
 logging.basicConfig(level=logging.INFO, stream=sys.stdout, format='%(asctime)s - %(levelname)s - %(message)s')
 
-OPENROUTER_API_KEY = os.environ["OPENROUTER_API_KEY"]
-GUMROAD_TOKEN = os.environ["GUMROAD_TOKEN"]
+# ---------- API KEYS ----------
+GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
+GUMROAD_TOKEN  = os.environ["GUMROAD_TOKEN"]
 TWITTER_API_KEY = os.environ["TWITTER_API_KEY"]
 TWITTER_API_KEY_SECRET = os.environ["TWITTER_API_KEY_SECRET"]
 TWITTER_ACCESS_TOKEN = os.environ["TWITTER_ACCESS_TOKEN"]
@@ -15,23 +16,19 @@ PINTEREST_ACCESS_TOKEN = os.environ.get("PINTEREST_ACCESS_TOKEN", "")
 HIRE_ME_URL = os.environ.get("HIRE_ME_URL", "")
 
 def llm_generate(prompt):
-    url = "https://openrouter.ai/api/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "HTTP-Referer": "https://github.com",
-        "Content-Type": "application/json"
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+    headers = {"Content-Type": "application/json"}
+    data = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"temperature": 0.8, "maxOutputTokens": 2048}
     }
-    payload = {
-        "model": "openrouter/auto",
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.8,
-        "max_tokens": 2048
-    }
-    resp = requests.post(url, headers=headers, json=payload, timeout=60)
-    resp.raise_for_status()
+    resp = requests.post(url, headers=headers, json=data, timeout=60)
+    if resp.status_code != 200:
+        raise Exception(f"Gemini error {resp.status_code}: {resp.text}")
     result = resp.json()
-    return result["choices"][0]["message"]["content"]
+    return result["candidates"][0]["content"]["parts"][0]["text"]
 
+# ---------- TRENDING ----------
 def get_trending_problem():
     prompt = "You are a market researcher. Suggest ONE specific, popular problem people are actively searching for in the self-improvement, productivity, or side hustle space. It should be something that could be solved with a short $5 digital guide. Only return the problem title as a single sentence. Example: \"How to create a morning routine that actually sticks\""
     return llm_generate(prompt).strip().strip('"')
@@ -101,6 +98,7 @@ def publish_to_gumroad(ebook_title, pdf_path, problem_title):
         logging.info("File uploaded successfully.")
     return short_url
 
+# ---------- HASKNODE ----------
 CACHED_PUB_ID = None
 
 def get_hasnode_publication_id():
