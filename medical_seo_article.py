@@ -3,9 +3,8 @@ import os, sys, logging, requests, json, random
 logging.basicConfig(level=logging.INFO, stream=sys.stdout,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 
-OPENROUTER_API_KEY = os.environ["OPENROUTER_API_KEY"]
 DEVTO_API_KEY = os.environ["DEVTO_API_KEY"]
-HIRE_ME_URL = os.environ["HIRE_ME_URL"]   # KFC Writers Carrd page
+HIRE_ME_URL = os.environ["HIRE_ME_URL"]
 
 KEYWORDS = [
     "how to write a medical manuscript",
@@ -21,34 +20,30 @@ KEYWORDS = [
 ]
 
 def llm_generate(prompt):
-    url = "https://openrouter.ai/api/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "HTTP-Referer": "https://github.com",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "model": "openrouter/auto",
+    url = "https://text.pollinations.ai/openai"
+    headers = {"Content-Type": "application/json"}
+    data = {
+        "model": "openai",
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.8,
         "max_tokens": 2048
     }
-    resp = requests.post(url, headers=headers, json=payload, timeout=60)
-    if resp.status_code != 200:
-        raise Exception(f"OpenRouter error {resp.status_code}: {resp.text}")
-    result = resp.json()
-    return result["choices"][0]["message"]["content"]
+    resp = requests.post(url, headers=headers, json=data, timeout=60)
+    resp.raise_for_status()
+    return resp.json()["choices"][0]["message"]["content"]
 
 keyword = random.choice(KEYWORDS)
-title_prompt = f"Generate a catchy, SEO-optimized blog title targeting the keyword '{keyword}'. Return only the title."
+
+title_prompt = f"Generate a catchy, SEO-optimized blog title targeting the keyword '{keyword}'. The title should appeal to researchers, PhD students, or doctors. Return only the title."
 title = llm_generate(title_prompt).strip().strip('"')
 
 body_intro = (
-    "Writing a strong medical manuscript or thesis can be challenging, but with the right approach you can make your work shine. "
-    "In this article, we share practical, actionable advice to help you plan, structure, and polish your medical and scientific writing.\n\n"
+    "Need help with your medical thesis, manuscript, or journal submission? "
+    "I provide end‑to‑end medical writing services—from synopsis planning and complete thesis writing to article preparation and publication support. "
+    "Below, we share practical advice for navigating academic writing efficiently.\n\n"
 )
 
-body_prompt = f"""Write a 500‑word purely educational blog article with the title "{title}". Start by acknowledging the difficulty of medical writing. Then give 3‑4 concrete tips (e.g., outline first, use clear language, follow journal guidelines, revise ruthlessly). Do NOT mention any services, products, or prices. End with a very short, neutral note: 'For more writing resources, you can visit {HIRE_ME_URL}.' Write in Markdown."""
+body_prompt = f"""Write a 500‑word blog article with the title "{title}". Start with a brief empathetic paragraph about the challenges of academic medical writing. Then provide 3‑4 practical tips (e.g., structuring a thesis synopsis, choosing the right journal, improving manuscript clarity). End with a clear call‑to‑action: 'Need professional help with your medical writing project? Visit {HIRE_ME_URL} to learn more about my services.' Write in Markdown."""
 body = llm_generate(body_prompt)
 full_body = body_intro + body
 
