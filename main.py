@@ -4,7 +4,6 @@ from fpdf import FPDF
 logging.basicConfig(level=logging.INFO, stream=sys.stdout, format='%(asctime)s - %(levelname)s - %(message)s')
 
 # ---------- API KEYS ----------
-GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 GUMROAD_TOKEN  = os.environ["GUMROAD_TOKEN"]
 TWITTER_API_KEY = os.environ["TWITTER_API_KEY"]
 TWITTER_API_KEY_SECRET = os.environ["TWITTER_API_KEY_SECRET"]
@@ -15,18 +14,22 @@ HASKNODE_PUBLICATION_HOST = os.environ["HASKNODE_PUBLICATION_ID"]
 PINTEREST_ACCESS_TOKEN = os.environ.get("PINTEREST_ACCESS_TOKEN", "")
 HIRE_ME_URL = os.environ.get("HIRE_ME_URL", "")
 
+# ---------- Pollinations.AI (free, no API key) ----------
+POLLINATIONS_URL = "https://text.pollinations.ai/openai"
+
 def llm_generate(prompt):
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
     headers = {"Content-Type": "application/json"}
     data = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.8, "maxOutputTokens": 2048}
+        "model": "openai",
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.8,
+        "max_tokens": 2048
     }
-    resp = requests.post(url, headers=headers, json=data, timeout=60)
+    resp = requests.post(POLLINATIONS_URL, headers=headers, json=data, timeout=60)
     if resp.status_code != 200:
-        raise Exception(f"Gemini error {resp.status_code}: {resp.text}")
+        raise Exception(f"Pollinations error {resp.status_code}: {resp.text}")
     result = resp.json()
-    return result["candidates"][0]["content"]["parts"][0]["text"]
+    return result["choices"][0]["message"]["content"]
 
 # ---------- TRENDING ----------
 def get_trending_problem():
