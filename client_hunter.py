@@ -8,7 +8,7 @@ logging.basicConfig(level=logging.INFO, stream=sys.stdout,
 
 SERPER_API_KEY = os.environ["SERPER_API_KEY"]
 MINELEAD_API_KEY = os.environ["MINELEAD_API_KEY"]
-OPENROUTER_API_KEY = os.environ["OPENROUTER_API_KEY"]
+GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 YOUR_EMAIL = os.environ["YOUR_EMAIL"]
 GMAIL_CLIENT_ID = os.environ["GMAIL_CLIENT_ID"]
 GMAIL_CLIENT_SECRET = os.environ["GMAIL_CLIENT_SECRET"]
@@ -30,15 +30,16 @@ def get_access_token():
 
 def search_leads():
     queries = [
-        '"medical writer needed" OR "medical writing services" OR "manuscript editing"',
-        '"need a medical writer" OR "looking for medical editor" OR "help with case report"',
-        '"thesis writing service" OR "medical manuscript help" OR "journal submission help"',
+        '"medical writer" contact OR email OR "get in touch"',
+        '"hire a medical writer" OR "medical writing job" OR "medical editor wanted"',
+        '"thesis editing services" OR "manuscript editing" email OR contact',
+        'site:linkedin.com/in "medical writer" "email"',
     ]
     all_leads = []
     for query in queries:
         url = "https://google.serper.dev/search"
         headers = {"X-API-KEY": SERPER_API_KEY, "Content-Type": "application/json"}
-        payload = {"q": query, "num": 5}
+        payload = {"q": query, "num": 10}
         resp = requests.post(url, headers=headers, json=payload, timeout=30)
         if resp.status_code != 200:
             logging.warning(f"Serper error {resp.status_code} for query: {query}")
@@ -89,11 +90,16 @@ Rules:
 - Include WhatsApp: +91 9812018036
 - End with: "Would you be open to a quick chat?"
 - Return ONLY the email body, no subject line."""
-    headers = {"Authorization": f"Bearer {OPENROUTER_API_KEY}", "Content-Type": "application/json"}
-    payload = {"model": "openrouter/auto", "messages": [{"role":"user","content":prompt}], "temperature":0.8, "max_tokens":500}
-    resp = requests.post("https://openrouter.ai/api/v1/chat/completions", headers=headers, json=payload, timeout=60)
+    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
+    headers = {"Content-Type": "application/json"}
+    data = {
+        "contents": [{"parts": [{"text": prompt}]}],
+        "generationConfig": {"temperature": 0.8, "maxOutputTokens": 500}
+    }
+    resp = requests.post(url, headers=headers, json=data, timeout=60)
     if resp.status_code == 200:
-        return resp.json()["choices"][0]["message"]["content"].strip()
+        result = resp.json()
+        return result["candidates"][0]["content"]["parts"][0]["text"].strip()
     return None
 
 def send_email_via_gmail_api(to_email, subject, html_body):
@@ -101,7 +107,6 @@ def send_email_via_gmail_api(to_email, subject, html_body):
     msg = EmailMessage()
     msg["From"] = f"KFC - Knowledge Framework Consulting <{YOUR_EMAIL}>"
     msg["To"] = to_email
-    # BCC removed – no copy to your inbox
     msg["Subject"] = subject
     msg.set_content("Please view this email in HTML format.")
     msg.add_alternative(html_body, subtype="html")
