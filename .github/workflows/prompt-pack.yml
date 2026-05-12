@@ -19,6 +19,5 @@ jobs:
         run: pip install requests fpdf2
       - name: Generate and publish prompt pack
         env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           GUMROAD_TOKEN: ${{ secrets.GUMROAD_TOKEN }}
         run: python prompt_pack.py
