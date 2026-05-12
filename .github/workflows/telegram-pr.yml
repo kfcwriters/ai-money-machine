@@ -19,7 +19,6 @@ jobs:
         run: pip install requests
       - name: Post to Telegram
         env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           HIRE_ME_URL: ${{ secrets.HIRE_ME_URL }}
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
