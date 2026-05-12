@@ -8,7 +8,6 @@ logging.basicConfig(level=logging.INFO, stream=sys.stdout,
 
 SERPER_API_KEY = os.environ["SERPER_API_KEY"]
 MINELEAD_API_KEY = os.environ["MINELEAD_API_KEY"]
-GEMINI_API_KEY = os.environ["GEMINI_API_KEY"]
 YOUR_EMAIL = os.environ["YOUR_EMAIL"]
 GMAIL_CLIENT_ID = os.environ["GMAIL_CLIENT_ID"]
 GMAIL_CLIENT_SECRET = os.environ["GMAIL_CLIENT_SECRET"]
@@ -16,6 +15,7 @@ GMAIL_REFRESH_TOKEN = os.environ["GMAIL_REFRESH_TOKEN"]
 
 SENT_LOG = ".sent_emails_log.json"
 MAX_EMAILS_PER_DAY = 10
+POLLINATIONS_URL = "https://text.pollinations.ai/openai"
 
 def get_access_token():
     resp = requests.post("https://oauth2.googleapis.com/token", data={
@@ -90,16 +90,17 @@ Rules:
 - Include WhatsApp: +91 9812018036
 - End with: "Would you be open to a quick chat?"
 - Return ONLY the email body, no subject line."""
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key={GEMINI_API_KEY}"
     headers = {"Content-Type": "application/json"}
     data = {
-        "contents": [{"parts": [{"text": prompt}]}],
-        "generationConfig": {"temperature": 0.8, "maxOutputTokens": 500}
+        "model": "openai",
+        "messages": [{"role": "user", "content": prompt}],
+        "temperature": 0.8,
+        "max_tokens": 500
     }
-    resp = requests.post(url, headers=headers, json=data, timeout=60)
+    resp = requests.post(POLLINATIONS_URL, headers=headers, json=data, timeout=60)
     if resp.status_code == 200:
         result = resp.json()
-        return result["candidates"][0]["content"]["parts"][0]["text"].strip()
+        return result["choices"][0]["message"]["content"].strip()
     return None
 
 def send_email_via_gmail_api(to_email, subject, html_body):
