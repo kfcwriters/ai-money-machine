@@ -19,7 +19,6 @@ jobs:
         run: pip install requests
       - name: Publish article
         env:
-          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
           DEVTO_API_KEY: ${{ secrets.DEVTO_API_KEY }}
           HIRE_ME_URL: ${{ secrets.HIRE_ME_URL }}
         run: python medical_seo_article.py
