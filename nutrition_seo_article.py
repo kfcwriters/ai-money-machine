@@ -3,9 +3,8 @@ import os, sys, logging, requests, json, random
 logging.basicConfig(level=logging.INFO, stream=sys.stdout,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 
-OPENROUTER_API_KEY = os.environ["OPENROUTER_API_KEY"]
 DEVTO_API_KEY = os.environ["DEVTO_API_KEY"]
-HIRE_ME_URL = os.environ["HIRE_ME_URL_NUTRITION"]   # NutriAid Carrd page
+HIRE_ME_URL = os.environ["HIRE_ME_URL_NUTRITION"]
 
 KEYWORDS = [
     "healthy eating tips for diabetes",
@@ -21,25 +20,20 @@ KEYWORDS = [
 ]
 
 def llm_generate(prompt):
-    url = "https://openrouter.ai/api/v1/chat/completions"
-    headers = {
-        "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-        "HTTP-Referer": "https://github.com",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "model": "openrouter/auto",
+    url = "https://text.pollinations.ai/openai"
+    headers = {"Content-Type": "application/json"}
+    data = {
+        "model": "openai",
         "messages": [{"role": "user", "content": prompt}],
         "temperature": 0.8,
         "max_tokens": 2048
     }
-    resp = requests.post(url, headers=headers, json=payload, timeout=60)
-    if resp.status_code != 200:
-        raise Exception(f"OpenRouter error {resp.status_code}: {resp.text}")
-    result = resp.json()
-    return result["choices"][0]["message"]["content"]
+    resp = requests.post(url, headers=headers, json=data, timeout=60)
+    resp.raise_for_status()
+    return resp.json()["choices"][0]["message"]["content"]
 
 keyword = random.choice(KEYWORDS)
+
 title_prompt = f"Generate a catchy, SEO-optimized blog title targeting the keyword '{keyword}'. Return only the title."
 title = llm_generate(title_prompt).strip().strip('"')
 
