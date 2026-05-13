@@ -1,7 +1,8 @@
 import os, sys, logging, json, requests, time, base64, re
 from pathlib import Path
-from urllib.parse import urlparse, quote_plus
+from urllib.parse import urlparse
 from email.message import EmailMessage
+from ai_helper import llm_generate   # <-- bulletproof AI
 
 logging.basicConfig(level=logging.INFO, stream=sys.stdout,
                     format='%(asctime)s - %(levelname)s - %(message)s')
@@ -14,7 +15,6 @@ GMAIL_REFRESH_TOKEN = os.environ["GMAIL_REFRESH_TOKEN"]
 
 SENT_LOG = ".sent_emails_log.json"
 MAX_EMAILS_PER_DAY = 8
-POLLINATIONS_URL = "https://text.pollinations.ai/openai"
 
 # ─────────────── Gmail token helper ───────────────
 def get_access_token():
@@ -70,7 +70,7 @@ def extract_email_from_page(url):
         logging.debug(f"Could not scrape {url}: {e}")
     return None
 
-# ─────────────── 3. GENERATE PERSONALISED PITCH (Pollinations) ───────────────
+# ─────────────── 3. GENERATE PERSONALISED PITCH (using bulletproof AI) ───────────────
 def generate_email(domain, snippet):
     prompt = f"""You are an outreach specialist for KFC - Knowledge Framework Consulting, a professional medical writing service.
 
@@ -87,21 +87,7 @@ Rules:
 - Include WhatsApp: +91 9812018036
 - End with: "Would you be open to a quick chat?"
 - Return ONLY the email body, no subject line."""
-    headers = {"Content-Type": "application/json"}
-    data = {
-        "model": "openai",
-        "messages": [{"role": "user", "content": prompt}],
-        "temperature": 0.8,
-        "max_tokens": 500
-    }
-    resp = requests.post(POLLINATIONS_URL, headers=headers, json=data, timeout=60)
-    if resp.status_code == 200:
-        result = resp.json()
-        try:
-            return result["choices"][0]["message"]["content"].strip()
-        except (KeyError, TypeError):
-            return None
-    return None
+    return llm_generate(prompt, max_tokens=500)
 
 # ─────────────── 4. SEND VIA GMAIL ───────────────
 def send_email_via_gmail(to_email, subject, html_body):
