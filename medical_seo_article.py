@@ -29,8 +29,14 @@ def llm_generate(prompt):
         "max_tokens": 2048
     }
     resp = requests.post(url, headers=headers, json=data, timeout=60)
-    resp.raise_for_status()
-    return resp.json()["choices"][0]["message"]["content"]
+    if resp.status_code != 200:
+        raise Exception(f"Pollinations error {resp.status_code}: {resp.text}")
+    result = resp.json()
+    try:
+        return result["choices"][0]["message"]["content"]
+    except (KeyError, TypeError):
+        # fallback: sometimes the field is named differently
+        return str(result["choices"][0].get("text", ""))
 
 keyword = random.choice(KEYWORDS)
 
