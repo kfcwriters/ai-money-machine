@@ -2,7 +2,7 @@ import os, sys, logging, json, requests, time, base64, re
 from pathlib import Path
 from urllib.parse import urlparse
 from email.message import EmailMessage
-from ai_helper import llm_generate   # <-- bulletproof AI
+from ai_helper import llm_generate
 
 logging.basicConfig(level=logging.INFO, stream=sys.stdout,
                     format='%(asctime)s - %(levelname)s - %(message)s')
@@ -14,7 +14,7 @@ GMAIL_CLIENT_SECRET = os.environ["GMAIL_CLIENT_SECRET"]
 GMAIL_REFRESH_TOKEN = os.environ["GMAIL_REFRESH_TOKEN"]
 
 SENT_LOG = ".sent_emails_log.json"
-MAX_EMAILS_PER_DAY = 8
+MAX_EMAILS_PER_DAY = 50
 
 # ─────────────── Gmail token helper ───────────────
 def get_access_token():
@@ -40,7 +40,7 @@ def search_contact_pages():
     for query in queries:
         url = "https://google.serper.dev/search"
         headers = {"X-API-KEY": SERPER_API_KEY, "Content-Type": "application/json"}
-        payload = {"q": query, "num": 8}
+        payload = {"q": query, "num": 10}
         resp = requests.post(url, headers=headers, json=payload, timeout=30)
         if resp.status_code != 200:
             logging.warning(f"Serper error {resp.status_code} for query: {query}")
@@ -70,7 +70,7 @@ def extract_email_from_page(url):
         logging.debug(f"Could not scrape {url}: {e}")
     return None
 
-# ─────────────── 3. GENERATE PERSONALISED PITCH (using bulletproof AI) ───────────────
+# ─────────────── 3. GENERATE PERSONALISED PITCH (pricing + free sample) ───────────────
 def generate_email(domain, snippet):
     prompt = f"""You are an outreach specialist for KFC - Knowledge Framework Consulting, a professional medical writing service.
 
@@ -78,14 +78,18 @@ We found a potential lead:
 - Company/Website: {domain}
 - Context from their page: {snippet}
 
-Write a short, warm, personalised cold email to pitch our medical writing services (thesis writing, manuscript editing, journal submission, case reports, literature reviews).
+Write a short, warm, personalised cold email to pitch our medical writing services. Include our real pricing so the lead knows what to expect:
+- Protocol/Synopsis: ₹3,000–₹5,000
+- Complete Thesis Writing: ₹40,000–₹50,000 (original, plagiarism‑free)
+- Journal Paper/Manuscript: ₹5,000–₹15,000 (as per journal requirements)
+
+Also mention that we offer a free 200‑word sample edit — no strings attached.
+
+End with: "Would you like a free sample edit or a quick call? Visit kfcwriters.github.io or WhatsApp +91 9812018036."
 
 Rules:
 - Keep it under 150 words, sound human
 - Mention something specific from their context
-- MUST include our website: kfcwriters.github.io
-- Include WhatsApp: +91 9812018036
-- End with: "Would you be open to a quick chat?"
 - Return ONLY the email body, no subject line."""
     return llm_generate(prompt, max_tokens=500)
 
@@ -120,10 +124,15 @@ def main():
     leads = search_contact_pages()
     sent_count = 0
 
+    skip_domains = ["gmail.com", "yahoo.com", "outlook.com", "hotmail.com",
+                    "reddit.com", "quora.com", "youtube.com", "facebook.com",
+                    "twitter.com", "instagram.com", "linkedin.com"]
+
     for lead in leads:
         domain = lead["domain"]
-        if domain in sent:
+        if domain in sent or any(s in domain for s in skip_domains):
             continue
+
         logging.info(f"Processing: {domain}")
         email_addr = extract_email_from_page(lead["contact_url"])
         if not email_addr:
