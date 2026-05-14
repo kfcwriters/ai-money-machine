@@ -59,33 +59,33 @@ def create_pdf(title, content):
     pdf.output("product.pdf")
     return "product.pdf"
 
-# ---------- GUMROAD (presigned upload, then attach) ----------
+# ---------- GUMROAD (presigned upload – FIXED) ----------
 def publish_to_gumroad(ebook_title, pdf_path, problem_title):
     headers = {"Authorization": f"Bearer {GUMROAD_TOKEN}"}
     
-    # 1. Presign – get upload URL
+    # 1. Presign – use `filename` (not `file_name`)
     file_size = os.path.getsize(pdf_path)
     presign_url = "https://api.gumroad.com/v2/files/presign"
     presign_data = {
-        "file_name": "product.pdf",
+        "filename": "product.pdf",          # <-- corrected
         "file_size": file_size,
-        "resource_type": "product"
+        "resource_type": "product",
+        "content_type": "application/pdf"
     }
     resp = requests.post(presign_url, headers=headers, json=presign_data, timeout=30)
     if resp.status_code != 200:
         raise Exception(f"Presign failed: {resp.status_code} {resp.text}")
     presign_info = resp.json()
     upload_url = presign_info["upload_url"]
-    file_url = presign_info["file_url"]          # the URL we'll attach to the product
+    file_url = presign_info["file_url"]
 
-    # 2. Upload file to the presigned S3 URL
+    # 2. Upload file to presigned S3 URL (PUT with raw data)
     with open(pdf_path, "rb") as f:
-        # The upload URL expects a PUT request with the file content as raw body
         put_resp = requests.put(upload_url, data=f, timeout=120)
     if put_resp.status_code not in (200, 201, 204):
         raise Exception(f"File upload to S3 failed: {put_resp.status_code}")
 
-    # 3. Create the product and attach the file URL
+    # 3. Create product and attach the file URL
     create_url = "https://api.gumroad.com/v2/products"
     product_data = {
         "name": sanitize_text(ebook_title),
