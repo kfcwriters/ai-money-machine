@@ -1,10 +1,10 @@
 import os, sys, logging, textwrap, requests
 from fpdf import FPDF
-from ai_helper import llm_generate   # your bulletproof AI
+from ai_helper import llm_generate   # bulletproof AI
 
 logging.basicConfig(level=logging.INFO, stream=sys.stdout, format='%(asctime)s - %(levelname)s - %(message)s')
 
-# ---------- API KEYS (only what we actually use) ----------
+# ---------- API KEYS ----------
 GUMROAD_TOKEN = os.environ["GUMROAD_TOKEN"]
 HIRE_ME_URL = os.environ.get("HIRE_ME_URL", "")
 
@@ -59,44 +59,33 @@ def create_pdf(title, content):
     pdf.output("product.pdf")
     return "product.pdf"
 
-# ---------- GUMROAD (product only, file upload retried) ----------
+# ---------- GUMROAD (single request – file always attached) ----------
 def publish_to_gumroad(ebook_title, pdf_path, problem_title):
+    url = "https://api.gumroad.com/v2/products"
     headers = {"Authorization": f"Bearer {GUMROAD_TOKEN}"}
 
-    create_url = "https://api.gumroad.com/v2/products"
-    product_data = {
-        "name": sanitize_text(ebook_title),
-        "description": f"This powerful guide solves: **{sanitize_text(problem_title)}**. Instant download.",
-        "price": "499",
-        "published": "true",
-    }
-    # Step 1: Create product
-    resp1 = requests.post(create_url, headers=headers, data=product_data, timeout=30)
-    if resp1.status_code != 200 or not resp1.json().get("success"):
-        msg = resp1.json().get("message", "Unknown error")
+    # Send product data AND the file in one multipart/form-data request
+    with open(pdf_path, "rb") as pdf_file:
+        fields = {
+            "name": sanitize_text(ebook_title),
+            "description": f"This powerful guide solves: **{sanitize_text(problem_title)}**. Instant download.",
+            "price": "499",
+            "published": "true",
+        }
+        files = {"file": ("product.pdf", pdf_file, "application/pdf")}
+        resp = requests.post(url, headers=headers, data=fields, files=files, timeout=60)
+
+    if resp.status_code == 200 and resp.json().get("success"):
+        product = resp.json()["product"]
+        short_url = product.get("short_url", "no-url")
+        logging.info(f"Gumroad product created with file: {short_url}")
+        return short_url
+    else:
+        msg = resp.json().get("message", "Unknown error") if resp.headers.get("content-type","").startswith("application/json") else resp.text
         logging.error(f"Gumroad product creation failed: {msg}")
         raise Exception(f"Gumroad API error: {msg}")
 
-    product_id = resp1.json()["product"]["id"]
-    short_url = resp1.json()["product"].get("short_url", "no-url")
-    logging.info(f"Gumroad product created: {short_url}")
-
-    # Step 2: Upload file (with retry)
-    upload_url = f"https://api.gumroad.com/v2/products/{product_id}/variant_files"
-    for attempt in range(2):
-        with open(pdf_path, "rb") as f:
-            files = {"file": ("product.pdf", f, "application/pdf")}
-            resp2 = requests.post(upload_url, headers=headers, files=files, timeout=60)
-        if resp2.status_code == 200:
-            logging.info("File uploaded successfully.")
-            return short_url
-        else:
-            logging.warning(f"File upload attempt {attempt+1} failed: {resp2.status_code} – {resp2.text[:100]}")
-
-    logging.warning("File upload failed after 2 attempts – product is live but may be missing the PDF.")
-    return short_url
-
-# ---------- MAIN (only Gumroad, no Hashnode/Twitter/Pinterest) ----------
+# ---------- MAIN (clean, no extra channels) ----------
 def main():
     logging.info("=== AI Money Machine Run Starting ===")
     try:
