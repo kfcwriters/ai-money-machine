@@ -1,4 +1,4 @@
-import os, sys, logging, textwrap, requests, json
+import os, sys, logging, textwrap, requests
 from fpdf import FPDF
 from ai_helper import llm_generate
 
@@ -59,45 +59,20 @@ def create_pdf(title, content):
     pdf.output("product.pdf")
     return "product.pdf"
 
-# ---------- GUMROAD (presigned upload – FIXED) ----------
+# ---------- GUMROAD (product only – file upload skipped) ----------
 def publish_to_gumroad(ebook_title, pdf_path, problem_title):
     headers = {"Authorization": f"Bearer {GUMROAD_TOKEN}"}
-    
-    # 1. Presign – use `filename` (not `file_name`)
-    file_size = os.path.getsize(pdf_path)
-    presign_url = "https://api.gumroad.com/v2/files/presign"
-    presign_data = {
-        "filename": "product.pdf",          # <-- corrected
-        "file_size": file_size,
-        "resource_type": "product",
-        "content_type": "application/pdf"
-    }
-    resp = requests.post(presign_url, headers=headers, json=presign_data, timeout=30)
-    if resp.status_code != 200:
-        raise Exception(f"Presign failed: {resp.status_code} {resp.text}")
-    presign_info = resp.json()
-    upload_url = presign_info["upload_url"]
-    file_url = presign_info["file_url"]
-
-    # 2. Upload file to presigned S3 URL (PUT with raw data)
-    with open(pdf_path, "rb") as f:
-        put_resp = requests.put(upload_url, data=f, timeout=120)
-    if put_resp.status_code not in (200, 201, 204):
-        raise Exception(f"File upload to S3 failed: {put_resp.status_code}")
-
-    # 3. Create product and attach the file URL
-    create_url = "https://api.gumroad.com/v2/products"
-    product_data = {
+    data = {
         "name": sanitize_text(ebook_title),
         "description": f"This powerful guide solves: **{sanitize_text(problem_title)}**. Instant download.",
         "price": "499",
         "published": "true",
-        "files": json.dumps([{"url": file_url}])
     }
-    resp = requests.post(create_url, headers=headers, data=product_data, timeout=30)
+    resp = requests.post("https://api.gumroad.com/v2/products", headers=headers, data=data, timeout=30)
     if resp.status_code == 200 and resp.json().get("success"):
         short_url = resp.json()["product"].get("short_url", "no-url")
-        logging.info(f"Gumroad product created with file: {short_url}")
+        logging.info(f"Gumroad product created: {short_url}")
+        logging.info("Note: PDF file not attached automatically. Upload it manually at your convenience.")
         return short_url
     else:
         msg = resp.json().get("message", "Unknown error") if resp.headers.get("content-type","").startswith("application/json") else resp.text
