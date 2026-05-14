@@ -1,0 +1,24 @@
+name: Daily Facebook Post
+
+on:
+  schedule:
+    - cron: '0 10 * * *'   # 10:00 UTC (3:30 PM IST)
+  workflow_dispatch:
+
+jobs:
+  post:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install libraries
+        run: pip install requests
+      - name: Publish to Facebook
+        env:
+          FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
+          FB_PAGE_TOKEN: ${{ secrets.FB_PAGE_TOKEN }}
+        run: python fb_daily_post.py
