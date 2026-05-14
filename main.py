@@ -1,6 +1,6 @@
 import os, sys, json, logging, textwrap, requests, tweepy
 from fpdf import FPDF
-from ai_helper import llm_generate   # <-- bulletproof AI
+from ai_helper import llm_generate   # bulletproof AI
 
 logging.basicConfig(level=logging.INFO, stream=sys.stdout, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -11,9 +11,12 @@ TWITTER_API_KEY_SECRET = os.environ["TWITTER_API_KEY_SECRET"]
 TWITTER_ACCESS_TOKEN = os.environ["TWITTER_ACCESS_TOKEN"]
 TWITTER_ACCESS_TOKEN_SECRET = os.environ["TWITTER_ACCESS_TOKEN_SECRET"]
 HASKNODE_TOKEN = os.environ["HASKNODE_TOKEN"]
-HASKNODE_PUBLICATION_HOST = os.environ["HASKNODE_PUBLICATION_ID"]
+HASKNODE_PUBLICATION_HOST = os.environ["HASKNODE_PUBLICATION_ID"]   # the domain (not used for ID anymore)
 PINTEREST_ACCESS_TOKEN = os.environ.get("PINTEREST_ACCESS_TOKEN", "")
 HIRE_ME_URL = os.environ.get("HIRE_ME_URL", "")
+
+# ---------- YOUR PUBLICATION ID (hardcoded – never fails) ----------
+HASKNODE_PUBLICATION_ID = "9b866f29-d3a5-4abc-8d07-a72e832e6962"
 
 # ---------- TRENDING PROBLEM ----------
 def get_trending_problem():
@@ -89,16 +92,20 @@ def publish_to_gumroad(ebook_title, pdf_path, problem_title):
         logging.info("File uploaded successfully.")
     return short_url
 
-# ---------- HASKNODE (hardcoded publication ID – never fails) ----------
-# 🔧 Replace with your actual publication ID (find in old logs or via curl)
-HASKNODE_PUBLICATION_ID_HARDCODED = "YOUR_PUBLICATION_ID"
-
+# ---------- HASKNODE (hardcoded ID – never fails) ----------
 def publish_hashnode_article(ebook_title, problem_title, gumroad_url):
     service_cta = f" Need professional medical writing help? Visit {HIRE_ME_URL}." if HIRE_ME_URL else ""
     blog_prompt = f"Write a helpful 300‑word blog article about: \"{problem_title}\". End with: 'Get the full $4.99 guide here: [GUIDE_LINK].{service_cta}' Use friendly tone."
     blog_body = llm_generate(blog_prompt).replace("[GUIDE_LINK]", gumroad_url)
     query = """mutation PublishPost($input: PublishPostInput!) { publishPost(input: $input) { post { slug, url } } }"""
-    variables = {"input": {"title": f"How to {sanitize_text(ebook_title)}", "contentMarkdown": blog_body, "publicationId": HASKNODE_PUBLICATION_ID_HARDCODED, "tags": []}}
+    variables = {
+        "input": {
+            "title": f"How to {sanitize_text(ebook_title)}",
+            "contentMarkdown": blog_body,
+            "publicationId": HASKNODE_PUBLICATION_ID,
+            "tags": []
+        }
+    }
     headers = {"Authorization": HASKNODE_TOKEN, "Content-Type": "application/json"}
     resp = requests.post("https://gql.hashnode.com/", json={"query": query, "variables": variables}, headers=headers, timeout=30)
     if resp.status_code == 200:
@@ -136,6 +143,7 @@ def main():
         logging.info("PDF generated.")
         gumroad_url = publish_to_gumroad(ebook_title, pdf_path, problem)
         logging.info(f"Gumroad URL: {gumroad_url}")
+        # Hashnode publish is now crash‑proof
         try:
             publish_hashnode_article(ebook_title, problem, gumroad_url)
         except Exception as e:
