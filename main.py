@@ -1,6 +1,6 @@
-import os, sys, logging, textwrap, requests
+import os, sys, logging, textwrap, requests, json
 from fpdf import FPDF
-from ai_helper import llm_generate   # bulletproof AI
+from ai_helper import llm_generate
 
 logging.basicConfig(level=logging.INFO, stream=sys.stdout, format='%(asctime)s - %(levelname)s - %(message)s')
 
@@ -59,33 +59,52 @@ def create_pdf(title, content):
     pdf.output("product.pdf")
     return "product.pdf"
 
-# ---------- GUMROAD (single request – file always attached) ----------
+# ---------- GUMROAD (presigned upload, then attach) ----------
 def publish_to_gumroad(ebook_title, pdf_path, problem_title):
-    url = "https://api.gumroad.com/v2/products"
     headers = {"Authorization": f"Bearer {GUMROAD_TOKEN}"}
+    
+    # 1. Presign – get upload URL
+    file_size = os.path.getsize(pdf_path)
+    presign_url = "https://api.gumroad.com/v2/files/presign"
+    presign_data = {
+        "file_name": "product.pdf",
+        "file_size": file_size,
+        "resource_type": "product"
+    }
+    resp = requests.post(presign_url, headers=headers, json=presign_data, timeout=30)
+    if resp.status_code != 200:
+        raise Exception(f"Presign failed: {resp.status_code} {resp.text}")
+    presign_info = resp.json()
+    upload_url = presign_info["upload_url"]
+    file_url = presign_info["file_url"]          # the URL we'll attach to the product
 
-    # Send product data AND the file in one multipart/form-data request
-    with open(pdf_path, "rb") as pdf_file:
-        fields = {
-            "name": sanitize_text(ebook_title),
-            "description": f"This powerful guide solves: **{sanitize_text(problem_title)}**. Instant download.",
-            "price": "499",
-            "published": "true",
-        }
-        files = {"file": ("product.pdf", pdf_file, "application/pdf")}
-        resp = requests.post(url, headers=headers, data=fields, files=files, timeout=60)
+    # 2. Upload file to the presigned S3 URL
+    with open(pdf_path, "rb") as f:
+        # The upload URL expects a PUT request with the file content as raw body
+        put_resp = requests.put(upload_url, data=f, timeout=120)
+    if put_resp.status_code not in (200, 201, 204):
+        raise Exception(f"File upload to S3 failed: {put_resp.status_code}")
 
+    # 3. Create the product and attach the file URL
+    create_url = "https://api.gumroad.com/v2/products"
+    product_data = {
+        "name": sanitize_text(ebook_title),
+        "description": f"This powerful guide solves: **{sanitize_text(problem_title)}**. Instant download.",
+        "price": "499",
+        "published": "true",
+        "files": json.dumps([{"url": file_url}])
+    }
+    resp = requests.post(create_url, headers=headers, data=product_data, timeout=30)
     if resp.status_code == 200 and resp.json().get("success"):
-        product = resp.json()["product"]
-        short_url = product.get("short_url", "no-url")
+        short_url = resp.json()["product"].get("short_url", "no-url")
         logging.info(f"Gumroad product created with file: {short_url}")
         return short_url
     else:
         msg = resp.json().get("message", "Unknown error") if resp.headers.get("content-type","").startswith("application/json") else resp.text
-        logging.error(f"Gumroad product creation failed: {msg}")
+        logging.error(f"Product creation failed: {msg}")
         raise Exception(f"Gumroad API error: {msg}")
 
-# ---------- MAIN (clean, no extra channels) ----------
+# ---------- MAIN ----------
 def main():
     logging.info("=== AI Money Machine Run Starting ===")
     try:
