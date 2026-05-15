@@ -1,56 +1,58 @@
 #!/usr/bin/env python3
-import os
-import sys
-import base64
-from email.mime.text import MIMEText
-from google.oauth2.credentials import Credentials
-from google.auth.transport.requests import Request
-from googleapiclient.discovery import build
+import time
+import requests
+import json
 
-# ---------- Load credentials from environment variables ----------
-CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
-CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
-REFRESH_TOKEN = os.getenv("GOOGLE_REFRESH_TOKEN")
+def llm_generate(prompt, max_retries=5):
+    """
+    Generate text using Pollinations.ai (new OpenAI-compatible endpoint).
+    Retries on failure.
+    """
+    # New API endpoint (OpenAI compatible)
+    url = "https://enter.pollinations.ai/v1/chat/completions"
+    
+    # Request payload
+    payload = {
+        "model": "openai",  # you can also use "mistral", "llama", etc.
+        "messages": [
+            {"role": "user", "content": prompt}
+        ],
+        "temperature": 0.7
+    }
+    
+    headers = {
+        "Content-Type": "application/json"
+    }
+    
+    for attempt in range(max_retries):
+        try:
+            resp = requests.post(url, json=payload, headers=headers, timeout=60)
+            
+            if resp.status_code == 200:
+                data = resp.json()
+                # Extract the assistant's reply
+                content = data["choices"][0]["message"]["content"]
+                return content.strip()
+            
+            # Log error and retry
+            print(f"Attempt {attempt+1}: HTTP {resp.status_code}, response: {resp.text[:200]}")
+            time.sleep(3 * (attempt + 1))  # longer wait each retry
+            
+        except Exception as e:
+            print(f"Attempt {attempt+1} exception: {e}")
+            time.sleep(3 * (attempt + 1))
+    
+    raise Exception("Pollinations API failed after multiple retries")
 
-if not CLIENT_ID or not CLIENT_SECRET or not REFRESH_TOKEN:
-    print("ERROR: Missing Google API credentials. Set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN")
-    sys.exit(1)
-
-# ---------- Gmail authentication ----------
-def get_gmail_service():
-    creds = Credentials(
-        token=None,
-        refresh_token=REFRESH_TOKEN,
-        token_uri="https://oauth2.googleapis.com/token",
-        client_id=CLIENT_ID,
-        client_secret=CLIENT_SECRET
-    )
-    creds.refresh(Request())
-    return build("gmail", "v1", credentials=creds)
-
-# ---------- Send email ----------
-def send_email_via_gmail(to, subject, html_content):
-    service = get_gmail_service()
-    message = MIMEText(html_content, "html")
-    message["to"] = to
-    message["subject"] = subject
-    raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
-    body = {"raw": raw}
-    result = service.users().messages().send(userId="me", body=body).execute()
-    print(f"✅ Email sent to {to} – Message ID: {result['id']}")
-    return result
-
-# ========== YOUR EXISTING CLIENT HUNTER LOGIC GOES BELOW ==========
-# For example, the functions that scrape contact pages and send emails.
-# Keep your original `main()` and scraping code – just replace the
-# authentication part with the above.
+# ========== YOUR EXISTING ARTICLE GENERATION LOGIC ==========
+# Keep your original functions – just replace the old llm_generate
+# with the one above.
 
 def main():
-    # Example: your existing code that finds contact pages and emails
-    # ...
-    # When you need to send an email, call:
-    # send_email_via_gmail(email_addr, subject, html)
-    pass
+    title_prompt = "Write an SEO-friendly title for a medical SEO article about telemedicine"
+    title = llm_generate(title_prompt).strip('"')
+    print(f"Generated title: {title}")
+    # ... rest of your code (e.g., generate body, save to file)
 
 if __name__ == "__main__":
     main()
