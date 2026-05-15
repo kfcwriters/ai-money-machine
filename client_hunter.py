@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Client Hunter – Finds junior medical researchers via PubMed Entrez API.
-Targets authors with Indian affiliations and few publications.
+Client Hunter – Finds junior medical researchers via OpenAlex API.
+Targets authors with Indian affiliations, in medical field, and low publication count.
 """
 
 import os
@@ -11,24 +11,28 @@ import base64
 import logging
 import dns.resolver
 import re
-from Bio import Entrez
 from email.mime.text import MIMEText
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
+# OpenAlex library
+import pyalex
+from pyalex import Authors
+
 # ========== CONFIGURATION ==========
 DELAY_BETWEEN_EMAILS = 5
 MAX_RETRIES = 3
 RETRY_DELAY = 5
-MAX_PAPERS = 50  # Number of papers to fetch per search term
+MAX_AUTHORS = 50
+MAX_WORKS_THRESHOLD = 10   # Authors with ≤10 works are considered "junior"
 
 # Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
 
-# ========== CREDENTIALS (Same as before) ==========
+# ========== CREDENTIALS ==========
 CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
 CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
 REFRESH_TOKEN = os.getenv("GOOGLE_REFRESH_TOKEN")
@@ -37,7 +41,7 @@ if not all([CLIENT_ID, CLIENT_SECRET, REFRESH_TOKEN]):
     logger.error("Missing Google API credentials. Set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN")
     sys.exit(1)
 
-# ========== GMAIL AUTH ==========
+# ========== GMAIL AUTH (Same as before) ==========
 def get_gmail_service():
     creds = Credentials(
         token=None,
@@ -94,80 +98,45 @@ def is_valid_email(email):
     blocked = {'example.com', 'test.com', 'localhost', 'domain.com', 'example.org', 'fake.com'}
     if email.split('@')[1].lower() in blocked:
         return False
-    # MX check is optional and may be slow; enable if needed.
-    # if not has_mx_record(email):
-    #     return False
     return True
 
-# ========== PUBMED SEARCH & FILTERING ==========
-def get_paper_ids(query, max_results=MAX_PAPERS):
-    """Search PubMed and return a list of PubMed IDs (PMIDs)."""
-    Entrez.email = "your-email@example.com"  # Replace with your email for NCBI
-    handle = Entrez.esearch(db="pubmed", term=query, retmax=max_results, sort="pub date")
-    record = Entrez.read(handle)
-    handle.close()
-    return record.get("IdList", [])
-
-def fetch_author_details(pmid_list):
-    """Retrieve authors and their email addresses for a list of PMIDs."""
-    Entrez.email = "your-email@example.com"  # Replace with your email for NCBI
-    authors = []
-    # Process PMIDs in batches to avoid overwhelming NCBI
-    for i in range(0, len(pmid_list), 20):
-        batch = pmid_list[i:i+20]
-        ids = ",".join(batch)
-        handle = Entrez.efetch(db="pubmed", id=ids, retmode="xml")
-        records = Entrez.read(handle)
-        handle.close()
-        for article in records.get("PubmedArticle", []):
-            # Extract the Affiliations and AuthorList
-            medline_citation = article.get("MedlineCitation", {})
-            article_data = medline_citation.get("Article", {})
-            author_list = article_data.get("AuthorList", {}).get("Author", [])
-            if not author_list:
-                continue
-            for author in author_list:
-                # Extract name
-                last_name = author.get("LastName", "")
-                fore_name = author.get("ForeName", "")
-                name = f"{fore_name} {last_name}".strip()
-                if not name:
-                    continue
-                # Try to find email in affiliation or author information
-                # Affiliation is not always present in the structured data
-                # We will rely on the email field if available, else try to guess.
-                # PubMed does NOT directly provide email for all authors.
-                # We'll need to either scrape the article page or use an alternative approach.
-                # For now, we'll collect authors and later try to guess email or skip.
-                authors.append({"name": name, "pmid": article.get("PMID", {}).get("#text", "")})
-    return authors
+# ========== OPENALEX API ==========
+def configure_openalex():
+    """Set up OpenAlex with polite pool email."""
+    pyalex.config.email = "your-email@example.com"  # Replace with your email
 
 def find_junior_medical_researchers():
-    """Orchestrate the PubMed search and return list of relevant email addresses."""
-    # Search for medical research papers with Indian affiliations in the last 5 years
-    query = '("medicine"[Title/Abstract] OR "medical"[Title/Abstract] OR "clinical"[Title/Abstract]) AND ("India"[Affiliation]) AND ("2020"[Date - Publication] : "2025"[Date - Publication])'
-    logger.info(f"Searching PubMed with query: {query}")
-    pmids = get_paper_ids(query, max_results=MAX_PAPERS)
-    logger.info(f"Found {len(pmids)} papers.")
-    if not pmids:
+    """Query OpenAlex for Indian medical researchers with low publication count."""
+    configure_openalex()
+    # Search for authors with:
+    # - Affiliation country: India
+    # - Concept id for 'medicine' (concept id for medicine is 'C138357053')
+    # - Works count <= MAX_WORKS_THRESHOLD
+    # - Has email (not null)
+    # - Works count > 0 (to ensure they have at least one publication)
+    filters = {
+        "last_known_institution.country_code": "IN",
+        "works_count": f"1-{MAX_WORKS_THRESHOLD}",
+        "email": "*",  # non-null email
+    }
+    # Note: The actual filtering by concept (research field) is more complex.
+    # This example filters by country and works count; refine as needed.
+    try:
+        authors = Authors().filter(**filters).get(per_page=MAX_AUTHORS)
+        emails = []
+        for author in authors:
+            # Extract email from the author record
+            email = author.get("email", "")
+            if email and is_valid_email(email):
+                # Additional check for seniority: if works_count is low, it's a junior
+                works_count = author.get("works_count", 0)
+                if works_count <= MAX_WORKS_THRESHOLD:
+                    emails.append(email)
+                    logger.info(f"Found junior author: {author.get('display_name')} ({email})")
+        return list(set(emails))
+    except Exception as e:
+        logger.error(f"OpenAlex query failed: {e}")
         return []
-    authors = fetch_author_details(pmids)
-    # We now have a list of authors, but we need to filter for juniors and find email addresses.
-    # PubMed does not provide email addresses directly. We'll need to either:
-    # 1. Use an external API (like OpenAlex) to get email (more reliable).
-    # 2. Try to extract email from the article full text (requires fetching full text, complex).
-    # For a working solution, I'll implement a method to guess email based on author name and institution.
-    # This is not perfect but can work for some cases.
-    # A better approach is to use OpenAlex API to get author profiles and email.
-    # I'll provide both methods: one using PubMed only (limited email), and one using OpenAlex.
-    # For now, I'll implement an example that searches for emails in the article data.
-    emails = []
-    for author in authors:
-        # Simple email guess: firstname.lastname@institution.ac.in
-        # We don't have institution info easily. This is just a placeholder.
-        # We'll skip for now and rely on OpenAlex.
-        pass
-    return list(set(emails))
 
 # ========== EMAIL CONTENT ==========
 def get_email_subject():
@@ -191,7 +160,7 @@ def get_email_html():
 
 # ========== MAIN ==========
 def main():
-    logger.info("=== Client Hunter Started (PubMed Entrez API) ===")
+    logger.info("=== Client Hunter Started (OpenAlex API) ===")
     emails = find_junior_medical_researchers()
     logger.info(f"Found {len(emails)} email candidates.")
     if not emails:
