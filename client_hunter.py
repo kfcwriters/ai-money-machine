@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Client Hunter – Finds junior medical researchers via OpenAlex API.
-Targets authors with Indian affiliations, low works count, and a non‑empty email.
+Client Hunter – Finds Indian medical researchers with email via OpenAlex API.
+Searches up to 200 authors, works count ≤50, then filters by email.
 """
 
 import os
@@ -23,8 +23,9 @@ from pyalex import Authors
 DELAY_BETWEEN_EMAILS = 5
 MAX_RETRIES = 3
 RETRY_DELAY = 5
-MAX_AUTHORS = 50
-MAX_WORKS_THRESHOLD = 10   # Authors with ≤10 works considered "junior"
+MAX_WORKS_THRESHOLD = 50   # Increased to get more results
+MAX_AUTHORS_TO_FETCH = 200 # Fetch more authors to find those with email
+PAGE_SIZE = 50             # per page
 
 # Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -90,34 +91,44 @@ def is_valid_email(email):
         return False
     return True
 
-# ========== OPENALEX API ==========
+# ========== OPENALEX API (PAGINATED) ==========
 def configure_openalex():
-    # Replace with your email to get polite pool access
+    # Replace with your real email for better rate limits
     pyalex.config.email = "your-email@example.com"
 
 def find_junior_medical_researchers():
-    """Query OpenAlex for Indian authors with low works count, then filter those with email."""
     configure_openalex()
-    # Only use valid filter fields (works_count and country code)
     filters = {
         "last_known_institutions.country_code": "IN",
         "works_count": f"1-{MAX_WORKS_THRESHOLD}",
     }
-    try:
-        # Fetch authors (up to MAX_AUTHORS)
-        authors = Authors().filter(**filters).get(per_page=MAX_AUTHORS)
-        emails = []
-        for author in authors:
-            email = author.get("email", "")
-            if email and is_valid_email(email):
-                # Additional check: ensure works count is within threshold (already filtered)
-                works_count = author.get("works_count", 0)
-                emails.append(email)
-                logger.info(f"Found: {author.get('display_name')} ({email}) – works: {works_count}")
-        return list(set(emails))
-    except Exception as e:
-        logger.error(f"OpenAlex query failed: {e}")
-        return []
+    emails = []
+    cursor = "*"
+    fetched = 0
+    while fetched < MAX_AUTHORS_TO_FETCH:
+        try:
+            # Use cursor for pagination
+            authors = Authors().filter(**filters).paginate(cursor=cursor, per_page=PAGE_SIZE)
+            page = next(authors, None)
+            if not page:
+                break
+            for author in page:
+                email = author.get("email", "")
+                if email and is_valid_email(email):
+                    emails.append(email)
+                    logger.info(f"Found: {author.get('display_name')} ({email}) – works: {author.get('works_count', 0)}")
+                fetched += 1
+                if fetched >= MAX_AUTHORS_TO_FETCH:
+                    break
+            cursor = getattr(page, 'next_cursor', None)
+            if not cursor:
+                break
+        except StopIteration:
+            break
+        except Exception as e:
+            logger.error(f"Error fetching authors: {e}")
+            break
+    return list(set(emails))
 
 # ========== EMAIL CONTENT ==========
 def get_email_subject():
