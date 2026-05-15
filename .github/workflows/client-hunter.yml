@@ -3,13 +3,18 @@ name: Client Hunter
 on:
   push:
     branches: [ main ]
-  workflow_dispatch:
+  schedule:
+    # Optional: run weekly on Monday at 9 AM UTC
+    - cron: '0 9 * * 1'
+  workflow_dispatch:   # allows manual trigger from GitHub UI
 
 jobs:
-  run-client-hunter:
+  hunt-clients:
     runs-on: ubuntu-latest
+
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -18,7 +23,8 @@ jobs:
 
       - name: Install dependencies
         run: |
-          pip install google-auth google-auth-oauthlib google-api-python-client
+          pip install --upgrade pip
+          pip install google-auth google-auth-oauthlib google-api-python-client dnspython beautifulsoup4 requests
 
       - name: Run client hunter
         run: python client_hunter.py
