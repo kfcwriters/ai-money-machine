@@ -1,20 +1,23 @@
 #!/usr/bin/env python3
 import os
-import pickle
-import requests
+import sys
+import base64
+from email.mime.text import MIMEText
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request
 from googleapiclient.discovery import build
-from email.mime.text import MIMEText
-import base64
 
-# Your credentials (REPLACE AFTER TESTING)
-CLIENT_ID = "921929857185-elflpkgmbu39911p2ahgdavc54b7al98.apps.googleusercontent.com"
-CLIENT_SECRET = "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"
-REFRESH_TOKEN = "1//04DR5kXoXvo9_CgYIARAAGAQSNwF-L9Ir8Pl8wGCejfJCtB4uzKe5NW-2P_OiXgTnEgpohrA7cGlh0s2wKmFztLLGEdO2_ZniqJg"
+# ---------- Load credentials from environment variables ----------
+CLIENT_ID = os.getenv("GOOGLE_CLIENT_ID")
+CLIENT_SECRET = os.getenv("GOOGLE_CLIENT_SECRET")
+REFRESH_TOKEN = os.getenv("GOOGLE_REFRESH_TOKEN")
 
+if not CLIENT_ID or not CLIENT_SECRET or not REFRESH_TOKEN:
+    print("ERROR: Missing Google API credentials. Set GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET, GOOGLE_REFRESH_TOKEN")
+    sys.exit(1)
+
+# ---------- Gmail authentication ----------
 def get_gmail_service():
-    """Return a Gmail service object using refresh token."""
     creds = Credentials(
         token=None,
         refresh_token=REFRESH_TOKEN,
@@ -25,26 +28,29 @@ def get_gmail_service():
     creds.refresh(Request())
     return build("gmail", "v1", credentials=creds)
 
+# ---------- Send email ----------
 def send_email_via_gmail(to, subject, html_content):
-    """Send an email using Gmail API."""
     service = get_gmail_service()
     message = MIMEText(html_content, "html")
     message["to"] = to
     message["subject"] = subject
-    # Encode in base64
     raw = base64.urlsafe_b64encode(message.as_bytes()).decode()
     body = {"raw": raw}
     result = service.users().messages().send(userId="me", body=body).execute()
-    print(f"Email sent to {to} – Message ID: {result['id']}")
+    print(f"✅ Email sent to {to} – Message ID: {result['id']}")
     return result
 
-# Example usage (your existing main logic)
+# ========== YOUR EXISTING CLIENT HUNTER LOGIC GOES BELOW ==========
+# For example, the functions that scrape contact pages and send emails.
+# Keep your original `main()` and scraping code – just replace the
+# authentication part with the above.
+
 def main():
-    # Your client hunting logic here (scraping etc.)
-    # For demonstration, just a test email
-    test_email = "test@example.com"
-    html = "<p>Hello, we offer medical writing support...</p>"
-    send_email_via_gmail(test_email, "Medical writing support for your team", html)
+    # Example: your existing code that finds contact pages and emails
+    # ...
+    # When you need to send an email, call:
+    # send_email_via_gmail(email_addr, subject, html)
+    pass
 
 if __name__ == "__main__":
     main()
