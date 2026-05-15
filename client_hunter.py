@@ -9,8 +9,8 @@ from email.mime.text import MIMEText
 import base64
 
 # Your credentials (REPLACE AFTER TESTING)
-CLIENT_ID = "921929857185-3oteean76en7tshu5ne5ktioqsocg6o2.apps.googleusercontent.com"
-CLIENT_SECRET = "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"
+CLIENT_ID = "921929857185-elflpkgmbu39911p2ahgdavc54b7al98.apps.googleusercontent.com"
+CLIENT_SECRET = "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"
 REFRESH_TOKEN = "1//04DR5kXoXvo9_CgYIARAAGAQSNwF-L9Ir8Pl8wGCejfJCtB4uzKe5NW-2P_OiXgTnEgpohrA7cGlh0s2wKmFztLLGEdO2_ZniqJg"
 
 def get_gmail_service():
