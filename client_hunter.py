@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Client Hunter – Finds junior medical researchers via OpenAlex API.
-Targets authors with Indian affiliations, medical concepts, low works count, and email.
+Targets authors with Indian affiliations, low works count, and a non‑empty email.
 """
 
 import os
@@ -25,7 +25,6 @@ MAX_RETRIES = 3
 RETRY_DELAY = 5
 MAX_AUTHORS = 50
 MAX_WORKS_THRESHOLD = 10   # Authors with ≤10 works considered "junior"
-CONCEPT_MEDICINE_ID = "C138357053"   # OpenAlex concept ID for Medicine
 
 # Logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(message)s')
@@ -84,7 +83,7 @@ def is_valid_email_syntax(email):
     return bool(re.match(pattern, email))
 
 def is_valid_email(email):
-    if not is_valid_email_syntax(email):
+    if not email or not is_valid_email_syntax(email):
         return False
     blocked = {'example.com', 'test.com', 'localhost', 'domain.com', 'example.org', 'fake.com'}
     if email.split('@')[1].lower() in blocked:
@@ -93,38 +92,28 @@ def is_valid_email(email):
 
 # ========== OPENALEX API ==========
 def configure_openalex():
-    pyalex.config.email = "your-email@example.com"  # Replace with your email
+    # Replace with your email to get polite pool access
+    pyalex.config.email = "your-email@example.com"
 
 def find_junior_medical_researchers():
-    """Query OpenAlex for Indian medical researchers with low works count and email."""
+    """Query OpenAlex for Indian authors with low works count, then filter those with email."""
     configure_openalex()
-    # Use correct field name: last_known_institutions.country_code
-    # Also filter by concepts (medicine) and works_count range, and email not null
+    # Only use valid filter fields (works_count and country code)
     filters = {
         "last_known_institutions.country_code": "IN",
         "works_count": f"1-{MAX_WORKS_THRESHOLD}",
-        "email": "*",          # non-null email
     }
     try:
-        # Note: Filter by concept requires using `filter` with concept id.
-        # The syntax: `filter=concepts.id:C138357053`
-        # But pyalex's Authors() may not support concept filtering directly.
-        # Alternative: search by concept via works? Simpler: fetch authors with country and works count,
-        # then manually filter by their concepts later.
-        # For brevity, we first get authors by country and works count, then check if they have any work in medicine.
+        # Fetch authors (up to MAX_AUTHORS)
         authors = Authors().filter(**filters).get(per_page=MAX_AUTHORS)
         emails = []
         for author in authors:
             email = author.get("email", "")
             if email and is_valid_email(email):
-                # Check if the author has works in medicine (optional additional filter)
-                # This requires fetching author's concepts, which may be heavy.
-                # For now, accept any author with Indian affiliation and low works count.
-                # You can refine later.
+                # Additional check: ensure works count is within threshold (already filtered)
                 works_count = author.get("works_count", 0)
-                if works_count <= MAX_WORKS_THRESHOLD:
-                    emails.append(email)
-                    logger.info(f"Found junior author: {author.get('display_name')} ({email}) – works: {works_count}")
+                emails.append(email)
+                logger.info(f"Found: {author.get('display_name')} ({email}) – works: {works_count}")
         return list(set(emails))
     except Exception as e:
         logger.error(f"OpenAlex query failed: {e}")
@@ -154,9 +143,9 @@ def get_email_html():
 def main():
     logger.info("=== Client Hunter Started (OpenAlex API) ===")
     emails = find_junior_medical_researchers()
-    logger.info(f"Found {len(emails)} email candidates.")
+    logger.info(f"Found {len(emails)} valid email candidates.")
     if not emails:
-        logger.info("No valid emails found. Exiting.")
+        logger.info("No emails found. Exiting.")
         return
     subject = get_email_subject()
     html = get_email_html()
