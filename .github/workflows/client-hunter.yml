@@ -1,4 +1,4 @@
-name: Client Hunter (Google Scholar)
+name: Client Hunter (OpenAlex)
 
 on:
   push:
@@ -28,7 +28,7 @@ jobs:
             google-auth \
             google-auth-oauthlib \
             google-api-python-client \
-            scholarly \
+            pyalex \
             dnspython
 
       - name: Run Client Hunter
