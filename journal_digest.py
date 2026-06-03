@@ -9,6 +9,7 @@ REPO = "kfcwriters/kfcwriters.github.io"
 BRANCH = "main"
 GITHUB_API = "https://api.github.com"
 
+# ─────────── PubMed fetch (tries multiple records until one has an abstract) ───────────
 def fetch_latest_pubmed():
     query = urllib.parse.quote("medical writing OR manuscript preparation OR journal submission")
     url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term={query}&retmax=5&sort=date&retmode=json"
@@ -19,9 +20,7 @@ def fetch_latest_pubmed():
     if not ids:
         raise Exception("No PubMed articles found today – will try again tomorrow.")
 
-    # Try each ID until we find one with an abstract
     for pmid in ids:
-        # 1. PubMed summary
         details_url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&id={pmid}&retmode=json"
         details_resp = requests.get(details_url, timeout=30)
         if details_resp.status_code != 200:
@@ -33,7 +32,6 @@ def fetch_latest_pubmed():
         pub_date = result.get("pubdate", "2026")
         authors = ", ".join([a["name"] for a in result.get("authors", [])[:3]])
 
-        # 2. PubMed full record (efetch)
         if not abstract or abstract.strip() == "":
             logging.info(f"Summary abstract empty for PMID {pmid}, trying full record…")
             efetch_url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id={pmid}&retmode=xml&rettype=abstract"
@@ -43,7 +41,6 @@ def fetch_latest_pubmed():
                 if match:
                     abstract = re.sub(r"<[^>]+>", "", match.group(1)).strip()
 
-        # 3. Crossref fallback
         if not abstract or abstract.strip() == "":
             logging.info(f"Trying Crossref for PMID {pmid}…")
             crossref_url = f"https://api.crossref.org/works?query={urllib.parse.quote(title)}&rows=1"
@@ -54,14 +51,13 @@ def fetch_latest_pubmed():
                     abstract = items[0].get("abstract", "")
                     abstract = re.sub(r"<[^>]+>", "", abstract).strip()
 
-        # If we got an abstract, return this article
         if abstract and abstract.strip() != "":
             logging.info(f"Using PMID {pmid} with valid abstract.")
             return pmid, title, abstract, journal, pub_date, authors
 
-    # If none of the 5 articles have an abstract, return a placeholder
     raise Exception("None of today's PubMed articles contained an abstract. Skipping digest.")
 
+# ─────────── GitHub file upload helper ───────────
 def upload_file_to_website(file_path, remote_path, commit_message):
     headers = {"Authorization": f"token {WEBSITE_REPO_TOKEN}", "Accept": "application/vnd.github.v3+json"}
     get_url = f"{GITHUB_API}/repos/{REPO}/contents/{remote_path}"
@@ -81,6 +77,47 @@ def upload_file_to_website(file_path, remote_path, commit_message):
     else:
         raise Exception(f"Failed to upload {remote_path}: {put_resp.status_code} {put_resp.text}")
 
+# ─────────── Build and upload the digest index page ───────────
+def get_existing_digests():
+    headers = {"Authorization": f"token {WEBSITE_REPO_TOKEN}", "Accept": "application/vnd.github.v3+json"}
+    url = f"{GITHUB_API}/repos/{REPO}/contents/digests"
+    resp = requests.get(url, headers=headers, timeout=30)
+    if resp.status_code == 200:
+        return [item["name"] for item in resp.json() if item["name"].endswith(".html") and item["name"] != "index.html"]
+    return []
+
+def update_index_page(digests):
+    digests.sort(reverse=True)
+    links = "\n".join([f'<li><a href="{d}">{d.replace("digest-","").replace(".html","")}</a></li>' for d in digests])
+    index_html = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Medical Research Digests</title>
+    <style>
+        body {{ font-family: Georgia, serif; max-width: 800px; margin: 40px auto; padding: 0 20px; line-height: 1.6; }}
+        h1 {{ color: #0d47a1; }}
+        ul {{ list-style: none; padding: 0; }}
+        li {{ margin: 10px 0; }}
+        a {{ text-decoration: none; color: #0d47a1; }}
+        a:hover {{ text-decoration: underline; }}
+    </style>
+</head>
+<body>
+    <h1>Medical Research Digests</h1>
+    <p>Daily summaries of the latest published medical research.</p>
+    <ul>
+        {links}
+    </ul>
+    <p style="margin-top: 30px; font-size: 0.9em;">Need help with your own manuscript? <a href="https://kfcwriters.github.io">Visit our main site</a>.</p>
+</body>
+</html>"""
+    with open("temp_index.html", "w", encoding="utf-8") as f:
+        f.write(index_html)
+    upload_file_to_website("temp_index.html", "digests/index.html", "Update digest index")
+
+# ─────────── Main ───────────
 def main():
     logging.info("=== Medical Journal Digest ===")
     try:
@@ -118,6 +155,11 @@ def main():
         with open("temp_digest.html", "w", encoding="utf-8") as f:
             f.write(html_content)
         upload_file_to_website("temp_digest.html", f"digests/{filename}", f"Add research digest for {today}")
+
+        existing = get_existing_digests()
+        if filename not in existing:
+            existing.append(filename)
+        update_index_page(existing)
         logging.info("=== Done ===")
     except Exception as e:
         logging.exception("Fatal error")
