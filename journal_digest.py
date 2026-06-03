@@ -1,4 +1,4 @@
-import os, sys, logging, requests, urllib.parse, datetime, base64, json
+import os, sys, logging, requests, urllib.parse, datetime, base64
 from pathlib import Path
 
 logging.basicConfig(level=logging.INFO, stream=sys.stdout,
@@ -9,7 +9,6 @@ REPO = "kfcwriters/kfcwriters.github.io"
 BRANCH = "main"
 GITHUB_API = "https://api.github.com"
 
-# ─────────── PubMed fetch (free, no key) ───────────
 def fetch_latest_pubmed():
     query = urllib.parse.quote("medical writing OR manuscript preparation OR journal submission")
     url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term={query}&retmax=5&sort=date&retmode=json"
@@ -32,30 +31,8 @@ def fetch_latest_pubmed():
     authors = ", ".join([a["name"] for a in result.get("authors", [])[:3]])
     return pmid, title, abstract, journal, pub_date, authors
 
-# ─────────── AI Summary (using ai_helper) ───────────
-from ai_helper import llm_generate
-
-def generate_digest(pmid, title, abstract, journal, pub_date, authors):
-    prompt = f"""You are a medical writer. Below is the abstract of a published research paper. Write a 300‑word summary in simple English that a researcher or clinician would find useful. Include:
-- What was studied (1 sentence)
-- Key findings (2‑3 bullets)
-- What this means for medical practice or writing (1‑2 sentences)
-- End with: "Need help with your own medical writing or manuscript preparation? Visit kfcwriters.github.io or WhatsApp +91 9812018036."
-
-Paper:
-Title: {title}
-Authors: {authors}
-Journal: {journal}
-Date: {pub_date}
-Abstract: {abstract[:2000]}
-
-Return only the summary, in plain text, no extra commentary."""
-    return llm_generate(prompt, max_tokens=500)
-
-# ─────────── Publish to website repo ───────────
 def upload_file_to_website(file_path, remote_path, commit_message):
     headers = {"Authorization": f"token {WEBSITE_REPO_TOKEN}", "Accept": "application/vnd.github.v3+json"}
-    # get current file sha if exists
     get_url = f"{GITHUB_API}/repos/{REPO}/contents/{remote_path}"
     resp = requests.get(get_url, headers=headers, timeout=30)
     sha = None
@@ -77,12 +54,10 @@ def upload_file_to_website(file_path, remote_path, commit_message):
     else:
         raise Exception(f"Failed to upload {remote_path}: {put_resp.status_code} {put_resp.text}")
 
-# ─────────── Main ───────────
 def main():
     logging.info("=== Medical Journal Digest ===")
     try:
         pmid, title, abstract, journal, pub_date, authors = fetch_latest_pubmed()
-        summary = generate_digest(pmid, title, abstract, journal, pub_date, authors)
         today = datetime.datetime.utcnow().strftime("%Y-%m-%d")
         filename = f"digest-{today}.html"
         html_content = f"""<!DOCTYPE html>
@@ -95,27 +70,26 @@ def main():
         body {{ font-family: Georgia, serif; max-width: 800px; margin: 40px auto; padding: 0 20px; line-height: 1.6; }}
         h1 {{ color: #0d47a1; }}
         .meta {{ color: #666; font-size: 0.9em; margin-bottom: 20px; }}
-        .summary {{ font-size: 1.1em; white-space: pre-line; }}
+        .abstract {{ font-size: 1.1em; white-space: pre-line; background: #f9f9f9; padding: 15px; border-radius: 5px; }}
         .disclaimer {{ font-size: 0.8em; color: #888; margin-top: 30px; border-top: 1px solid #ddd; padding-top: 10px; }}
-        .cta {{ background: #e3f2fd; padding: 15px; border-radius: 8px; margin-top: 20px; }}
+        .cta {{ background: #e3f2fd; padding: 15px; border-radius: 8px; margin-top: 20px; text-align: center; }}
     </style>
 </head>
 <body>
     <h1>{title}</h1>
     <p class="meta"><strong>Authors:</strong> {authors} | <strong>Journal:</strong> {journal} | <strong>Date:</strong> {pub_date} | <strong>PubMed ID:</strong> {pmid}</p>
     <hr>
-    <div class="summary">{summary}</div>
+    <h3>Abstract</h3>
+    <div class="abstract">{abstract}</div>
     <div class="cta">
         <strong>Need help with your own medical manuscript?</strong><br>
         Visit <a href="https://kfcwriters.github.io">kfcwriters.github.io</a> or WhatsApp +91 9812018036.
     </div>
-    <p class="disclaimer">This digest is an AI‑generated summary for educational purposes. Original research should be consulted directly.</p>
+    <p class="disclaimer">This digest is an educational summary of a published research paper. The original article should be consulted directly for clinical or research purposes.</p>
 </body>
 </html>"""
-        # save local temp file
         with open("temp_digest.html", "w", encoding="utf-8") as f:
             f.write(html_content)
-        # upload to website
         upload_file_to_website("temp_digest.html", f"digests/{filename}", f"Add research digest for {today}")
         logging.info("=== Done ===")
     except Exception as e:
