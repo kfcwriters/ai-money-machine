@@ -1,10 +1,7 @@
 import requests, logging, time
 
 def llm_generate(prompt, max_tokens=800, temperature=0.8):
-    """
-    Call free AI providers with automatic retry.
-    If all providers fail, returns a fallback message that includes the original prompt's key info.
-    """
+    """Call free AI providers with automatic retry. If all fail, return a helpful placeholder."""
     # ── Primary: Pollinations ──
     for attempt in range(1, 4):
         try:
@@ -22,7 +19,7 @@ def llm_generate(prompt, max_tokens=800, temperature=0.8):
                 try:
                     return result["choices"][0]["message"]["content"]
                 except (KeyError, TypeError):
-                    pass   # fall through to retry
+                    pass
             logging.warning(f"Pollinations attempt {attempt} failed (status {resp.status_code}). Retrying…")
             time.sleep(2)
         except Exception as e:
@@ -42,10 +39,12 @@ def llm_generate(prompt, max_tokens=800, temperature=0.8):
     except Exception as e:
         logging.warning(f"Hugging Face fallback exception: {e}")
 
-    # ── Ultimate fallback: return a placeholder message ──
+    # ── Ultimate fallback: provide a placeholder with instructions ──
     fallback_message = (
-        "Automatic AI summary unavailable at this time. "
-        "Please check back later or contact us directly for the latest updates."
+        "We’re currently unable to generate an automatic summary for this paper. "
+        "Please read the original abstract on PubMed (ID provided above) for detailed information. "
+        "For help with your own medical writing or manuscript preparation, visit kfcwriters.github.io "
+        "or WhatsApp +91 9812018036."
     )
     logging.error("All AI providers failed. Returning fallback message.")
     return fallback_message
