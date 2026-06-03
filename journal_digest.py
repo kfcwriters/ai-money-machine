@@ -1,20 +1,16 @@
-import os, sys, logging, requests, urllib.parse, datetime
-from ai_helper import llm_generate
-from google.oauth2.credentials import Credentials
-from googleapiclient.discovery import build
-from google.auth.transport.requests import Request
+import os, sys, logging, requests, urllib.parse, datetime, base64, json
+from pathlib import Path
 
 logging.basicConfig(level=logging.INFO, stream=sys.stdout,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 
-BLOGGER_CLIENT_ID = os.environ["BLOGGER_CLIENT_ID"]
-BLOGGER_CLIENT_SECRET = os.environ["BLOGGER_CLIENT_SECRET"]
-BLOGGER_REFRESH_TOKEN = os.environ["BLOGGER_REFRESH_TOKEN"]
-BLOGGER_BLOG_ID = os.environ["BLOGGER_BLOG_ID"]
+WEBSITE_REPO_TOKEN = os.environ["WEBSITE_REPO_TOKEN"]
+REPO = "kfcwriters/kfcwriters.github.io"
+BRANCH = "main"
+GITHUB_API = "https://api.github.com"
 
-# ──────────── PubMed fetch (free, no key) ────────────
+# ─────────── PubMed fetch (free, no key) ───────────
 def fetch_latest_pubmed():
-    """Fetch the most recent free article from PubMed for a medical writing related query."""
     query = urllib.parse.quote("medical writing OR manuscript preparation OR journal submission")
     url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term={query}&retmax=5&sort=date&retmode=json"
     resp = requests.get(url, timeout=30)
@@ -23,7 +19,6 @@ def fetch_latest_pubmed():
     ids = resp.json()["esearchresult"]["idlist"]
     if not ids:
         raise Exception("No PubMed articles found today – will try again tomorrow.")
-    # Fetch details of the first article
     pmid = ids[0]
     details_url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&id={pmid}&retmode=json"
     details_resp = requests.get(details_url, timeout=30)
@@ -37,7 +32,9 @@ def fetch_latest_pubmed():
     authors = ", ".join([a["name"] for a in result.get("authors", [])[:3]])
     return pmid, title, abstract, journal, pub_date, authors
 
-# ──────────── AI Summary ────────────
+# ─────────── AI Summary (using ai_helper) ───────────
+from ai_helper import llm_generate
+
 def generate_digest(pmid, title, abstract, journal, pub_date, authors):
     prompt = f"""You are a medical writer. Below is the abstract of a published research paper. Write a 300‑word summary in simple English that a researcher or clinician would find useful. Include:
 - What was studied (1 sentence)
@@ -55,48 +52,71 @@ Abstract: {abstract[:2000]}
 Return only the summary, in plain text, no extra commentary."""
     return llm_generate(prompt, max_tokens=500)
 
-# ──────────── Publish to Blogger (with retry) ────────────
-def post_to_blogger(title, content_html):
-    creds = Credentials(
-        None,
-        refresh_token=BLOGGER_REFRESH_TOKEN,
-        token_uri="https://oauth2.googleapis.com/token",
-        client_id=BLOGGER_CLIENT_ID,
-        client_secret=BLOGGER_CLIENT_SECRET
-    )
-    # Force refresh of access token
-    try:
-        creds.refresh(Request())
-    except Exception as e:
-        raise Exception(f"Blogger token refresh failed. Please regenerate BLOGGER_REFRESH_TOKEN. Error: {e}")
-
-    service = build("blogger", "v3", credentials=creds)
-    post_body = {
-        "kind": "blogger#post",
-        "title": f"Research Digest: {title[:80]}...",
-        "content": content_html,
-        "labels": ["medical research", "journal digest", "medical writing"]
+# ─────────── Publish to website repo ───────────
+def upload_file_to_website(file_path, remote_path, commit_message):
+    headers = {"Authorization": f"token {WEBSITE_REPO_TOKEN}", "Accept": "application/vnd.github.v3+json"}
+    # get current file sha if exists
+    get_url = f"{GITHUB_API}/repos/{REPO}/contents/{remote_path}"
+    resp = requests.get(get_url, headers=headers, timeout=30)
+    sha = None
+    if resp.status_code == 200:
+        sha = resp.json().get("sha")
+    with open(file_path, "rb") as f:
+        content_b64 = base64.b64encode(f.read()).decode()
+    payload = {
+        "message": commit_message,
+        "content": content_b64,
+        "branch": BRANCH
     }
-    service.posts().insert(blogId=BLOGGER_BLOG_ID, body=post_body, isDraft=False).execute()
-    logging.info(f"Journal digest published: {title[:60]}...")
+    if sha:
+        payload["sha"] = sha
+    put_url = f"{GITHUB_API}/repos/{REPO}/contents/{remote_path}"
+    put_resp = requests.put(put_url, headers=headers, json=payload, timeout=30)
+    if put_resp.status_code in (201, 200):
+        logging.info(f"Uploaded {remote_path} to website repo.")
+    else:
+        raise Exception(f"Failed to upload {remote_path}: {put_resp.status_code} {put_resp.text}")
 
-# ──────────── Main ────────────
+# ─────────── Main ───────────
 def main():
     logging.info("=== Medical Journal Digest ===")
     try:
         pmid, title, abstract, journal, pub_date, authors = fetch_latest_pubmed()
         summary = generate_digest(pmid, title, abstract, journal, pub_date, authors)
-        html_content = f"""
-        <div style="font-family: Georgia, serif; max-width: 800px; margin: 20px auto; padding: 20px; border-left: 4px solid #0d47a1;">
-            <h2 style="color: #0d47a1;">{title}</h2>
-            <p><strong>Authors:</strong> {authors} | <strong>Journal:</strong> {journal} | <strong>Date:</strong> {pub_date}</p>
-            <p><strong>PubMed ID:</strong> {pmid}</p>
-            <hr>
-            <p style="white-space: pre-line; font-size: 1.1em;">{summary}</p>
-            <p style="font-size: 0.85em; color: #666; margin-top: 20px;">This digest is an AI‑generated summary for educational purposes. Original research should be consulted directly.</p>
-        </div>
-        """
-        post_to_blogger(title, html_content)
+        today = datetime.datetime.utcnow().strftime("%Y-%m-%d")
+        filename = f"digest-{today}.html"
+        html_content = f"""<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Research Digest: {title}</title>
+    <style>
+        body {{ font-family: Georgia, serif; max-width: 800px; margin: 40px auto; padding: 0 20px; line-height: 1.6; }}
+        h1 {{ color: #0d47a1; }}
+        .meta {{ color: #666; font-size: 0.9em; margin-bottom: 20px; }}
+        .summary {{ font-size: 1.1em; white-space: pre-line; }}
+        .disclaimer {{ font-size: 0.8em; color: #888; margin-top: 30px; border-top: 1px solid #ddd; padding-top: 10px; }}
+        .cta {{ background: #e3f2fd; padding: 15px; border-radius: 8px; margin-top: 20px; }}
+    </style>
+</head>
+<body>
+    <h1>{title}</h1>
+    <p class="meta"><strong>Authors:</strong> {authors} | <strong>Journal:</strong> {journal} | <strong>Date:</strong> {pub_date} | <strong>PubMed ID:</strong> {pmid}</p>
+    <hr>
+    <div class="summary">{summary}</div>
+    <div class="cta">
+        <strong>Need help with your own medical manuscript?</strong><br>
+        Visit <a href="https://kfcwriters.github.io">kfcwriters.github.io</a> or WhatsApp +91 9812018036.
+    </div>
+    <p class="disclaimer">This digest is an AI‑generated summary for educational purposes. Original research should be consulted directly.</p>
+</body>
+</html>"""
+        # save local temp file
+        with open("temp_digest.html", "w", encoding="utf-8") as f:
+            f.write(html_content)
+        # upload to website
+        upload_file_to_website("temp_digest.html", f"digests/{filename}", f"Add research digest for {today}")
         logging.info("=== Done ===")
     except Exception as e:
         logging.exception("Fatal error")
