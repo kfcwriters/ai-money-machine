@@ -18,45 +18,49 @@ def fetch_latest_pubmed():
     ids = resp.json()["esearchresult"]["idlist"]
     if not ids:
         raise Exception("No PubMed articles found today – will try again tomorrow.")
-    pmid = ids[0]
 
-    # 1. PubMed summary
-    details_url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&id={pmid}&retmode=json"
-    details_resp = requests.get(details_url, timeout=30)
-    if details_resp.status_code != 200:
-        raise Exception("PubMed details failed")
-    result = details_resp.json()["result"][pmid]
-    title = result["title"]
-    abstract = result.get("abstract", "")
-    journal = result.get("fulljournalname", "Unknown Journal")
-    pub_date = result.get("pubdate", "2026")
-    authors = ", ".join([a["name"] for a in result.get("authors", [])[:3]])
+    # Try each ID until we find one with an abstract
+    for pmid in ids:
+        # 1. PubMed summary
+        details_url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&id={pmid}&retmode=json"
+        details_resp = requests.get(details_url, timeout=30)
+        if details_resp.status_code != 200:
+            continue
+        result = details_resp.json()["result"][pmid]
+        title = result["title"]
+        abstract = result.get("abstract", "")
+        journal = result.get("fulljournalname", "Unknown Journal")
+        pub_date = result.get("pubdate", "2026")
+        authors = ", ".join([a["name"] for a in result.get("authors", [])[:3]])
 
-    # 2. PubMed full record (efetch) if abstract missing
-    if not abstract or abstract.strip() == "":
-        logging.info("Abstract not found in summary, fetching full record…")
-        efetch_url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id={pmid}&retmode=xml&rettype=abstract"
-        efetch_resp = requests.get(efetch_url, timeout=30)
-        if efetch_resp.status_code == 200:
-            match = re.search(r"<Abstract>(.*?)</Abstract>", efetch_resp.text, re.DOTALL)
-            if match:
-                abstract = re.sub(r"<[^>]+>", "", match.group(1)).strip()
+        # 2. PubMed full record (efetch)
+        if not abstract or abstract.strip() == "":
+            logging.info(f"Summary abstract empty for PMID {pmid}, trying full record…")
+            efetch_url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id={pmid}&retmode=xml&rettype=abstract"
+            efetch_resp = requests.get(efetch_url, timeout=30)
+            if efetch_resp.status_code == 200:
+                match = re.search(r"<Abstract>(.*?)</Abstract>", efetch_resp.text, re.DOTALL)
+                if match:
+                    abstract = re.sub(r"<[^>]+>", "", match.group(1)).strip()
 
-    # 3. Crossref fallback
-    if not abstract or abstract.strip() == "":
-        logging.info("Trying Crossref for abstract…")
-        crossref_url = f"https://api.crossref.org/works?query={urllib.parse.quote(title)}&rows=1"
-        crossref_resp = requests.get(crossref_url, timeout=30)
-        if crossref_resp.status_code == 200:
-            items = crossref_resp.json().get("message", {}).get("items", [])
-            if items:
-                abstract = items[0].get("abstract", "")
-                abstract = re.sub(r"<[^>]+>", "", abstract).strip()   # strip HTML
+        # 3. Crossref fallback
+        if not abstract or abstract.strip() == "":
+            logging.info(f"Trying Crossref for PMID {pmid}…")
+            crossref_url = f"https://api.crossref.org/works?query={urllib.parse.quote(title)}&rows=1"
+            crossref_resp = requests.get(crossref_url, timeout=30)
+            if crossref_resp.status_code == 200:
+                items = crossref_resp.json().get("message", {}).get("items", [])
+                if items:
+                    abstract = items[0].get("abstract", "")
+                    abstract = re.sub(r"<[^>]+>", "", abstract).strip()
 
-    if not abstract or abstract.strip() == "":
-        abstract = "No abstract available for this article. You can read the full text on PubMed (ID above)."
+        # If we got an abstract, return this article
+        if abstract and abstract.strip() != "":
+            logging.info(f"Using PMID {pmid} with valid abstract.")
+            return pmid, title, abstract, journal, pub_date, authors
 
-    return pmid, title, abstract, journal, pub_date, authors
+    # If none of the 5 articles have an abstract, return a placeholder
+    raise Exception("None of today's PubMed articles contained an abstract. Skipping digest.")
 
 def upload_file_to_website(file_path, remote_path, commit_message):
     headers = {"Authorization": f"token {WEBSITE_REPO_TOKEN}", "Accept": "application/vnd.github.v3+json"}
