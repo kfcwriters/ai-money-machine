@@ -4,7 +4,8 @@ from google.oauth2.credentials import Credentials
 from googleapiclient.discovery import build
 from google.auth.transport.requests import Request
 
-logging.basicConfig(level=logging.INFO, stream=sys.stdout, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, stream=sys.stdout,
+                    format='%(asctime)s - %(levelname)s - %(message)s')
 
 BLOGGER_CLIENT_ID = os.environ["BLOGGER_CLIENT_ID"]
 BLOGGER_CLIENT_SECRET = os.environ["BLOGGER_CLIENT_SECRET"]
@@ -14,15 +15,14 @@ BLOGGER_BLOG_ID = os.environ["BLOGGER_BLOG_ID"]
 # ──────────── PubMed fetch (free, no key) ────────────
 def fetch_latest_pubmed():
     """Fetch the most recent free article from PubMed for a medical writing related query."""
-    # Search for recent articles about medical writing, manuscript preparation, etc.
     query = urllib.parse.quote("medical writing OR manuscript preparation OR journal submission")
     url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term={query}&retmax=5&sort=date&retmode=json"
     resp = requests.get(url, timeout=30)
     if resp.status_code != 200:
-        raise Exception("PubMed search failed")
+        raise Exception(f"PubMed search failed: {resp.status_code}")
     ids = resp.json()["esearchresult"]["idlist"]
     if not ids:
-        raise Exception("No PubMed articles found")
+        raise Exception("No PubMed articles found today – will try again tomorrow.")
     # Fetch details of the first article
     pmid = ids[0]
     details_url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&id={pmid}&retmode=json"
@@ -55,11 +55,21 @@ Abstract: {abstract[:2000]}
 Return only the summary, in plain text, no extra commentary."""
     return llm_generate(prompt, max_tokens=500)
 
-# ──────────── Publish to Blogger ────────────
+# ──────────── Publish to Blogger (with retry) ────────────
 def post_to_blogger(title, content_html):
-    creds = Credentials(None, refresh_token=BLOGGER_REFRESH_TOKEN, token_uri="https://oauth2.googleapis.com/token",
-                        client_id=BLOGGER_CLIENT_ID, client_secret=BLOGGER_CLIENT_SECRET)
-    creds.refresh(Request())
+    creds = Credentials(
+        None,
+        refresh_token=BLOGGER_REFRESH_TOKEN,
+        token_uri="https://oauth2.googleapis.com/token",
+        client_id=BLOGGER_CLIENT_ID,
+        client_secret=BLOGGER_CLIENT_SECRET
+    )
+    # Force refresh of access token
+    try:
+        creds.refresh(Request())
+    except Exception as e:
+        raise Exception(f"Blogger token refresh failed. Please regenerate BLOGGER_REFRESH_TOKEN. Error: {e}")
+
     service = build("blogger", "v3", credentials=creds)
     post_body = {
         "kind": "blogger#post",
