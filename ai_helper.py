@@ -39,7 +39,7 @@ def llm_generate(prompt, max_tokens=800, temperature=0.8):
     except Exception as e:
         logging.warning(f"Hugging Face fallback exception: {e}")
 
-    # ── Ultimate fallback: provide a placeholder with instructions ──
+    # ── Ultimate fallback: provide a useful placeholder ──
     fallback_message = (
         "We’re currently unable to generate an automatic summary for this paper. "
         "Please read the original abstract on PubMed (ID provided above) for detailed information. "
