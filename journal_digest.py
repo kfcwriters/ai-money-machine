@@ -21,6 +21,7 @@ def fetch_latest_pubmed():
         raise Exception("No PubMed articles found today – will try again tomorrow.")
 
     for pmid in ids:
+        # 1. PubMed summary
         details_url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&id={pmid}&retmode=json"
         details_resp = requests.get(details_url, timeout=30)
         if details_resp.status_code != 200:
@@ -32,8 +33,9 @@ def fetch_latest_pubmed():
         pub_date = result.get("pubdate", "2026")
         authors = ", ".join([a["name"] for a in result.get("authors", [])[:3]])
 
+        # 2. PubMed full record (efetch) if abstract missing
         if not abstract or abstract.strip() == "":
-            logging.info(f"Summary abstract empty for PMID {pmid}, trying full record…")
+            logging.info(f"Abstract not found in summary for PMID {pmid}, trying full record…")
             efetch_url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id={pmid}&retmode=xml&rettype=abstract"
             efetch_resp = requests.get(efetch_url, timeout=30)
             if efetch_resp.status_code == 200:
@@ -41,6 +43,7 @@ def fetch_latest_pubmed():
                 if match:
                     abstract = re.sub(r"<[^>]+>", "", match.group(1)).strip()
 
+        # 3. Crossref fallback
         if not abstract or abstract.strip() == "":
             logging.info(f"Trying Crossref for PMID {pmid}…")
             crossref_url = f"https://api.crossref.org/works?query={urllib.parse.quote(title)}&rows=1"
@@ -94,7 +97,7 @@ def update_index_page(digests):
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Medical Research Digests</title>
+    <title>Latest Medical Literature</title>
     <style>
         body {{ font-family: Georgia, serif; max-width: 800px; margin: 40px auto; padding: 0 20px; line-height: 1.6; }}
         h1 {{ color: #0d47a1; }}
@@ -105,7 +108,7 @@ def update_index_page(digests):
     </style>
 </head>
 <body>
-    <h1>Medical Research Digests</h1>
+    <h1>Latest Medical Literature</h1>
     <p>Daily summaries of the latest published medical research.</p>
     <ul>
         {links}
