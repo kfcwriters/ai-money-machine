@@ -19,13 +19,27 @@ def fetch_latest_pubmed():
     if not ids:
         raise Exception("No PubMed articles found today – will try again tomorrow.")
     pmid = ids[0]
+    # first, get the summary
     details_url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&id={pmid}&retmode=json"
     details_resp = requests.get(details_url, timeout=30)
     if details_resp.status_code != 200:
         raise Exception("PubMed details failed")
     result = details_resp.json()["result"][pmid]
     title = result["title"]
-    abstract = result.get("abstract", "No abstract available.")
+    abstract = result.get("abstract", "")
+    # if abstract is missing, try the full record (efetch)
+    if not abstract or abstract.strip() == "":
+        logging.info("Abstract not found in summary, fetching full record…")
+        efetch_url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id={pmid}&retmode=xml&rettype=abstract"
+        efetch_resp = requests.get(efetch_url, timeout=30)
+        if efetch_resp.status_code == 200:
+            import re
+            # extract abstract from XML
+            match = re.search(r"<Abstract>(.*?)</Abstract>", efetch_resp.text, re.DOTALL)
+            if match:
+                abstract = re.sub(r"<[^>]+>", "", match.group(1)).strip()
+    if not abstract:
+        abstract = "No abstract available for this article."
     journal = result.get("fulljournalname", "Unknown Journal")
     pub_date = result.get("pubdate", "2026")
     authors = ", ".join([a["name"] for a in result.get("authors", [])[:3]])
