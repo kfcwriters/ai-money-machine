@@ -1,4 +1,4 @@
-import os, sys, logging, requests, urllib.parse, datetime, base64, re
+import os, sys, logging, requests, urllib.parse, datetime, base64, re, json
 from pathlib import Path
 
 logging.basicConfig(level=logging.INFO, stream=sys.stdout,
@@ -80,7 +80,7 @@ def upload_file_to_website(file_path, remote_path, commit_message):
     else:
         raise Exception(f"Failed to upload {remote_path}: {put_resp.status_code} {put_resp.text}")
 
-# ─────────── Build and upload the digest index page ───────────
+# ─────────── Get existing digest file names ───────────
 def get_existing_digests():
     headers = {"Authorization": f"token {WEBSITE_REPO_TOKEN}", "Accept": "application/vnd.github.v3+json"}
     url = f"{GITHUB_API}/repos/{REPO}/contents/digests"
@@ -89,9 +89,32 @@ def get_existing_digests():
         return [item["name"] for item in resp.json() if item["name"].endswith(".html") and item["name"] != "index.html"]
     return []
 
+# ─────────── Read / write the titles log file ───────────
+def get_titles_log():
+    """Return a dict of {filename: article_title} from digests/.titles.json, or empty dict."""
+    headers = {"Authorization": f"token {WEBSITE_REPO_TOKEN}", "Accept": "application/vnd.github.v3+json"}
+    url = f"{GITHUB_API}/repos/{REPO}/contents/digests/.titles.json"
+    resp = requests.get(url, headers=headers, timeout=30)
+    if resp.status_code == 200:
+        content = resp.json().get("content", "")
+        if content:
+            return json.loads(base64.b64decode(content).decode())
+    return {}
+
+def save_titles_log(titles):
+    """Write the titles dict to digests/.titles.json."""
+    with open("temp_titles.json", "w") as f:
+        json.dump(titles, f)
+    upload_file_to_website("temp_titles.json", "digests/.titles.json", "Update digest titles log")
+
+# ─────────── Build and upload the digest index page ───────────
 def update_index_page(digests):
+    titles = get_titles_log()
     digests.sort(reverse=True)
-    links = "\n".join([f'<li><a href="{d}">{d.replace("digest-","").replace(".html","")}</a></li>' for d in digests])
+    links = "\n".join([
+        f'<li><a href="{d}">{titles.get(d, d.replace("digest-","").replace(".html",""))}</a></li>'
+        for d in digests
+    ])
     index_html = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -157,8 +180,16 @@ def main():
 </html>"""
         with open("temp_digest.html", "w", encoding="utf-8") as f:
             f.write(html_content)
+
+        # Upload the digest
         upload_file_to_website("temp_digest.html", f"digests/{filename}", f"Add research digest for {today}")
 
+        # Update the titles log
+        titles = get_titles_log()
+        titles[filename] = title
+        save_titles_log(titles)
+
+        # Update the index page
         existing = get_existing_digests()
         if filename not in existing:
             existing.append(filename)
