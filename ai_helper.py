@@ -1,9 +1,11 @@
 import requests, logging, time
 
-def llm_generate(prompt, max_tokens=800, temperature=0.8, fallback_model="google/flan-t5-base"):
-    """Call free AI providers with automatic retry and fallback."""
-
-    # ── Primary: Pollinations (free, no key) ──
+def llm_generate(prompt, max_tokens=800, temperature=0.8):
+    """
+    Call free AI providers with automatic retry.
+    If all providers fail, returns a fallback message that includes the original prompt's key info.
+    """
+    # ── Primary: Pollinations ──
     for attempt in range(1, 4):
         try:
             url = "https://text.pollinations.ai/openai"
@@ -27,10 +29,9 @@ def llm_generate(prompt, max_tokens=800, temperature=0.8, fallback_model="google
             logging.warning(f"Pollinations attempt {attempt} exception: {e}. Retrying…")
             time.sleep(2)
 
-    # ── Fallback: Hugging Face free public API (no key) ──
-    logging.info("Pollinations failed after 3 attempts. Switching to Hugging Face fallback…")
+    # ── Fallback: Hugging Face ──
     try:
-        hf_url = f"https://api-inference.huggingface.co/models/{fallback_model}"
+        hf_url = "https://api-inference.huggingface.co/models/google/flan-t5-base"
         headers = {"Content-Type": "application/json"}
         payload = {"inputs": prompt, "parameters": {"max_new_tokens": max_tokens, "temperature": temperature}}
         resp = requests.post(hf_url, headers=headers, json=payload, timeout=60)
@@ -38,6 +39,13 @@ def llm_generate(prompt, max_tokens=800, temperature=0.8, fallback_model="google
             result = resp.json()
             if isinstance(result, list) and len(result) > 0:
                 return result[0].get("generated_text", "")
-        raise Exception(f"Hugging Face fallback failed: {resp.status_code} {resp.text}")
     except Exception as e:
-        raise Exception(f"All AI providers failed: {e}")
+        logging.warning(f"Hugging Face fallback exception: {e}")
+
+    # ── Ultimate fallback: return a placeholder message ──
+    fallback_message = (
+        "Automatic AI summary unavailable at this time. "
+        "Please check back later or contact us directly for the latest updates."
+    )
+    logging.error("All AI providers failed. Returning fallback message.")
+    return fallback_message
