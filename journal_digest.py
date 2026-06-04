@@ -91,7 +91,6 @@ def get_existing_digests():
 
 # ─────────── Read / write the titles log file ───────────
 def get_titles_log():
-    """Return a dict of {filename: article_title} from digests/.titles.json, or empty dict."""
     headers = {"Authorization": f"token {WEBSITE_REPO_TOKEN}", "Accept": "application/vnd.github.v3+json"}
     url = f"{GITHUB_API}/repos/{REPO}/contents/digests/.titles.json"
     resp = requests.get(url, headers=headers, timeout=30)
@@ -102,7 +101,6 @@ def get_titles_log():
     return {}
 
 def save_titles_log(titles):
-    """Write the titles dict to digests/.titles.json."""
     with open("temp_titles.json", "w") as f:
         json.dump(titles, f)
     upload_file_to_website("temp_titles.json", "digests/.titles.json", "Update digest titles log")
@@ -150,6 +148,12 @@ def main():
         pmid, title, abstract, journal, pub_date, authors = fetch_latest_pubmed()
         today = datetime.datetime.utcnow().strftime("%Y-%m-%d")
         filename = f"digest-{today}.html"
+
+        # ── Build citation string ──
+        current_year = datetime.datetime.utcnow().strftime("%Y")
+        month_day = datetime.datetime.utcnow().strftime("%B %d")
+        citation = f"KFC Writers. ({current_year}, {month_day}). Research Digest: {title}. Retrieved from https://kfcwriters.github.io/digests/{filename}"
+
         html_content = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -161,7 +165,8 @@ def main():
         h1 {{ color: #0d47a1; }}
         .meta {{ color: #666; font-size: 0.9em; margin-bottom: 20px; }}
         .abstract {{ font-size: 1.1em; white-space: pre-line; background: #f9f9f9; padding: 15px; border-radius: 5px; }}
-        .disclaimer {{ font-size: 0.8em; color: #888; margin-top: 30px; border-top: 1px solid #ddd; padding-top: 10px; }}
+        .citation {{ font-size: 0.9em; color: #555; margin-top: 20px; padding: 10px; background: #f0f0f0; border-radius: 5px; }}
+        .disclaimer {{ font-size: 0.8em; color: #888; margin-top: 20px; border-top: 1px solid #ddd; padding-top: 10px; }}
         .cta {{ background: #e3f2fd; padding: 15px; border-radius: 8px; margin-top: 20px; text-align: center; }}
     </style>
 </head>
@@ -171,6 +176,12 @@ def main():
     <hr>
     <h3>Abstract</h3>
     <div class="abstract">{abstract}</div>
+
+    <div class="citation">
+        <strong>How to Cite This Digest:</strong><br>
+        {citation}
+    </div>
+
     <div class="cta">
         <strong>Need help with your own medical manuscript?</strong><br>
         Visit <a href="https://kfcwriters.github.io">kfcwriters.github.io</a> or WhatsApp +91 9812018036.
