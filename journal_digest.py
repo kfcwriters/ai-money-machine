@@ -8,10 +8,13 @@ WEBSITE_REPO_TOKEN = os.environ["WEBSITE_REPO_TOKEN"]
 REPO = "kfcwriters/kfcwriters.github.io"
 BRANCH = "main"
 GITHUB_API = "https://api.github.com"
+JOURNAL_FOLDER = "Journal"   # <-- changed from "reviews"
 
-# ─────────── PubMed fetch (multiple articles) ───────────
+# Import your existing AI helper (uses Pollinations.ai, no key needed)
+from ai_helper import llm_generate
+
+# ---------- PubMed fetch (unchanged) ----------
 def fetch_pubmed_articles(topic, count=8):
-    """Fetch up to `count` recent PubMed articles for a topic."""
     query = urllib.parse.quote(topic)
     url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi?db=pubmed&term={query}&retmax={count}&sort=date&retmode=json"
     resp = requests.get(url, timeout=30)
@@ -23,7 +26,6 @@ def fetch_pubmed_articles(topic, count=8):
     
     articles = []
     for pmid in ids:
-        # Fetch summary
         details_url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi?db=pubmed&id={pmid}&retmode=json"
         details_resp = requests.get(details_url, timeout=30)
         if details_resp.status_code != 200:
@@ -31,7 +33,6 @@ def fetch_pubmed_articles(topic, count=8):
         result = details_resp.json()["result"][pmid]
         title = result["title"]
         abstract = result.get("abstract", "")
-        # Try full record if abstract missing
         if not abstract or abstract.strip() == "":
             efetch_url = f"https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi?db=pubmed&id={pmid}&retmode=xml&rettype=abstract"
             efetch_resp = requests.get(efetch_url, timeout=30)
@@ -57,18 +58,13 @@ def fetch_pubmed_articles(topic, count=8):
         raise Exception("No suitable articles found.")
     return articles
 
-# ─────────── AI Original Review (using ai_helper) ───────────
-from ai_helper import llm_generate
-
 def generate_original_review(articles, topic):
-    """Write a structured original review article synthesising the given papers."""
-    # Build a concise summary of each article for the AI prompt
     summaries = []
-    for a in articles[:8]:  # use up to 8 papers
+    for a in articles[:8]:
         summaries.append(f"PMID {a['pmid']}: {a['title']} ({a['journal']}, {a['pub_date']}) - {a['abstract'][:300]}")
     combined = "\n".join(summaries)
     
-    prompt = f"""You are a medical writer. Write a **original review article** on the topic '{topic}'. 
+    prompt = f"""You are a medical writer. Write an **original review article** on the topic '{topic}'. 
 Base your review on the following recent PubMed papers, but do NOT simply copy their abstracts. 
 Instead, synthesise the information into a coherent, critical review with the following sections:
 
@@ -87,7 +83,7 @@ Here are the papers:
 Return ONLY the review article content (including the references list), no extra commentary."""
     return llm_generate(prompt, max_tokens=2000)
 
-# ─────────── GitHub file upload helper (same as before) ───────────
+# ---------- GitHub upload helper (now targets Journal/ folder) ----------
 def upload_file_to_website(file_path, remote_path, commit_message):
     headers = {"Authorization": f"token {WEBSITE_REPO_TOKEN}", "Accept": "application/vnd.github.v3+json"}
     get_url = f"{GITHUB_API}/repos/{REPO}/contents/{remote_path}"
@@ -107,134 +103,106 @@ def upload_file_to_website(file_path, remote_path, commit_message):
     else:
         raise Exception(f"Failed to upload {remote_path}: {put_resp.status_code} {put_resp.text}")
 
-def get_existing_articles():
-    headers = {"Authorization": f"token {WEBSITE_REPO_TOKEN}", "Accept": "application/vnd.github.v3+json"}
-    url = f"{GITHUB_API}/repos/{REPO}/contents/reviews"
-    resp = requests.get(url, headers=headers, timeout=30)
-    if resp.status_code == 200:
-        return [item["name"] for item in resp.json() if item["name"].endswith(".html") and item["name"] != "index.html"]
-    return []
-
-def get_titles_log():
-    headers = {"Authorization": f"token {WEBSITE_REPO_TOKEN}", "Accept": "application/vnd.github.v3+json"}
-    url = f"{GITHUB_API}/repos/{REPO}/contents/reviews/.titles.json"
-    resp = requests.get(url, headers=headers, timeout=30)
-    if resp.status_code == 200:
-        content = resp.json().get("content", "")
-        if content:
-            return json.loads(base64.b64decode(content).decode())
-    return {}
-
-def save_titles_log(titles):
-    with open("temp_titles.json", "w") as f:
-        json.dump(titles, f)
-    upload_file_to_website("temp_titles.json", "reviews/.titles.json", "Update review titles log")
-
-def update_index_page(articles):
-    titles = get_titles_log()
-    articles.sort(reverse=True)
-    links = "\n".join([
-        f'<li><a href="{a}">{titles.get(a, a.replace("review-","").replace(".html",""))}</a></li>'
-        for a in articles
-    ])
-    index_html = f"""<!DOCTYPE html>
+# ---------- Attractive HTML template (matches your journal design) ----------
+def create_attractive_html(title, review_content, topic, today):
+    # Build a simple Vancouver reference list (if not already included by AI)
+    # We assume review_content already contains "References" section.
+    # If not, we could extract from the generated text.
+    
+    html_template = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Original Medical Reviews</title>
+    <title>Original Review: {title[:80]}</title>
     <style>
-        body {{ font-family: Georgia, serif; max-width: 800px; margin: 40px auto; padding: 0 20px; line-height: 1.6; }}
-        h1 {{ color: #0d47a1; }}
-        ul {{ list-style: none; padding: 0; }}
-        li {{ margin: 10px 0; }}
-        a {{ text-decoration: none; color: #0d47a1; }}
-        a:hover {{ text-decoration: underline; }}
+        * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+        body {{ font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; background: #f0f4f8; color: #1e2a3a; line-height: 1.5; }}
+        .navbar {{ background: #0d47a1; padding: 15px 20px; text-align: center; }}
+        .navbar a {{ color: white; text-decoration: none; margin: 0 15px; font-weight: 500; }}
+        .journal-header {{ background: linear-gradient(135deg, #0a2b4e, #1e4a76); color: white; text-align: center; padding: 50px 20px; }}
+        .journal-header h1 {{ font-size: 2.5rem; margin-bottom: 10px; }}
+        .container {{ max-width: 1100px; margin: 30px auto; padding: 0 20px; display: flex; flex-wrap: wrap; gap: 30px; }}
+        .main {{ flex: 3; background: white; border-radius: 16px; padding: 35px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); }}
+        .sidebar {{ flex: 1; background: white; border-radius: 16px; padding: 25px; box-shadow: 0 4px 12px rgba(0,0,0,0.05); align-self: start; }}
+        .sidebar h3 {{ background: #0d47a1; color: white; padding: 10px; margin: -25px -25px 20px -25px; border-radius: 16px 16px 0 0; }}
+        h1 {{ color: #0d47a1; font-size: 1.8rem; margin-bottom: 15px; }}
+        .meta {{ color: #5a7e9a; margin-bottom: 20px; font-size: 0.9rem; }}
+        .review-body {{ font-size: 1.05rem; line-height: 1.7; }}
+        .review-body h2 {{ color: #0d47a1; margin: 25px 0 10px; font-size: 1.4rem; }}
+        .review-body p {{ margin-bottom: 1rem; text-align: justify; }}
+        .review-body .references {{ margin-top: 30px; border-top: 1px solid #ddd; padding-top: 20px; font-size: 0.9rem; }}
+        .cta {{ background: #e3f2fd; padding: 15px; border-radius: 12px; margin-top: 30px; text-align: center; }}
+        .footer {{ background: #0f2a38; color: #8aaec0; text-align: center; padding: 20px; margin-top: 30px; }}
+        .footer a {{ color: #ffaa33; }}
+        @media (max-width: 800px) {{ .container {{ flex-direction: column; }} }}
     </style>
 </head>
 <body>
-    <h1>Original Medical Reviews</h1>
-    <p>Peer‑reviewed, synthesised reviews of the latest medical research.</p>
-    <ul>
-        {links}
-    </ul>
-    <p style="margin-top: 30px; font-size: 0.9em;">Need help with your own manuscript? <a href="https://kfcwriters.github.io">Visit our main site</a>.</p>
+    <div class="navbar">
+        <a href="index.html">Home</a>
+        <a href="aims-scope.html">Aims & Scope</a>
+        <a href="editorial-board.html">Editorial Board</a>
+        <a href="author-guidelines.html">Author Guidelines</a>
+        <a href="submit.html">Submit Article</a>
+    </div>
+    <div class="journal-header">
+        <h1>Global Journal of Medical Research</h1>
+        <p>Published by Knowledge Framework Consulting | ISSN: Applied for | Volume 1, Issue 1 | June 2026</p>
+    </div>
+    <div class="container">
+        <div class="main">
+            <h1>{title}</h1>
+            <div class="meta">Published: {today} | Co-Chief Editors: Abhishek Bansal & Dr. Praveen Parshant</div>
+            <div class="review-body">
+                {review_content}
+            </div>
+            <div class="cta">
+                <strong>Need help with your own medical manuscript?</strong><br>
+                Visit <a href="https://kfcwriters.github.io">kfcwriters.github.io</a> or WhatsApp +91 9812018036.
+            </div>
+        </div>
+        <div class="sidebar">
+            <h3>Journal Information</h3>
+            <p><strong>Publisher:</strong> Knowledge Framework Consulting</p>
+            <p><strong>Co-Chief Editors:</strong> Abhishek Bansal & Dr. Praveen Parshant</p>
+            <p><strong>Email:</strong> kfcwriters@gmail.com</p>
+            <hr>
+            <h3>For Authors</h3>
+            <ul>
+                <li><a href="aims-scope.html">Aims & Scope</a></li>
+                <li><a href="author-guidelines.html">Author Guidelines</a></li>
+                <li><a href="submit.html">Submit an Article</a></li>
+            </ul>
+        </div>
+    </div>
+    <div class="footer">
+        <p>© 2026 Knowledge Framework Consulting. All rights reserved. | <a href="https://kfcwriters.github.io">Main Site</a> | <a href="mailto:kfcwriters@gmail.com">Contact</a></p>
+    </div>
 </body>
 </html>"""
-    with open("temp_index.html", "w", encoding="utf-8") as f:
-        f.write(index_html)
-    upload_file_to_website("temp_index.html", "reviews/index.html", "Update review index")
+    return html_template
 
-# ─────────── Main ───────────
 def main():
-    logging.info("=== Original Medical Review Generator ===")
+    logging.info("=== Daily Medical Journal Digest (Attractive Version) ===")
     try:
-        # Choose a topic – you can rotate these or use a random selection
         topic = "recent advances in acne treatment OR post-inflammatory hyperpigmentation OR dermatology clinical practice"
         articles = fetch_pubmed_articles(topic, count=8)
-        if not articles:
-            raise Exception("No articles found for the selected topic.")
-        
         review_content = generate_original_review(articles, topic)
         today = datetime.datetime.utcnow().strftime("%Y-%m-%d")
+        # Extract a short title from the first sentence of the review
+        first_para = review_content.split("\n")[0][:100]
+        title = f"Original Review: {topic[:80]}"
+        html = create_attractive_html(title, review_content, topic, today)
+        
         filename = f"review-{today}.html"
-        
-        # Build citation block
-        current_year = datetime.datetime.utcnow().strftime("%Y")
-        month_day = datetime.datetime.utcnow().strftime("%B %d")
-        citation = f"KFC Writers. ({current_year}, {month_day}). Original Review: {topic}. KFC Journal of Medical Writing Reviews. Retrieved from https://kfcwriters.github.io/reviews/{filename}"
-        
-        html_content = f"""<!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Original Review: {topic}</title>
-    <style>
-        body {{ font-family: Georgia, serif; max-width: 800px; margin: 40px auto; padding: 0 20px; line-height: 1.6; }}
-        h1 {{ color: #0d47a1; }}
-        .meta {{ color: #666; font-size: 0.9em; margin-bottom: 20px; }}
-        .review-body {{ font-size: 1.1em; white-space: pre-line; }}
-        .citation {{ font-size: 0.9em; color: #555; margin-top: 20px; padding: 10px; background: #f0f0f0; border-radius: 5px; }}
-        .disclaimer {{ font-size: 0.8em; color: #888; margin-top: 20px; border-top: 1px solid #ddd; padding-top: 10px; }}
-        .cta {{ background: #e3f2fd; padding: 15px; border-radius: 8px; margin-top: 20px; text-align: center; }}
-    </style>
-</head>
-<body>
-    <h1>Original Review: {topic}</h1>
-    <p class="meta"><strong>Published:</strong> {today} | <strong>Journal:</strong> KFC Journal of Medical Writing Reviews</p>
-    <hr>
-    <div class="review-body">{review_content}</div>
-
-    <div class="citation">
-        <strong>How to Cite This Article:</strong><br>
-        {citation}
-    </div>
-
-    <div class="cta">
-        <strong>Need help with your own medical manuscript?</strong><br>
-        Visit <a href="https://kfcwriters.github.io">kfcwriters.github.io</a> or WhatsApp +91 9812018036.
-    </div>
-    <p class="disclaimer">This article is an original review synthesised from peer‑reviewed literature. It does not replace the original research, which should be consulted directly for clinical decisions.</p>
-</body>
-</html>"""
         with open("temp_review.html", "w", encoding="utf-8") as f:
-            f.write(html_content)
+            f.write(html)
         
-        # Upload the review
-        upload_file_to_website("temp_review.html", f"reviews/{filename}", f"Add original review for {today}")
+        # Upload to Journal/ folder
+        upload_file_to_website("temp_review.html", f"{JOURNAL_FOLDER}/{filename}", f"Add attractive review for {today}")
         
-        # Update titles log
-        titles = get_titles_log()
-        titles[filename] = f"Original Review: {topic}"
-        save_titles_log(titles)
-        
-        # Update index page
-        existing = get_existing_articles()
-        if filename not in existing:
-            existing.append(filename)
-        update_index_page(existing)
-        logging.info("=== Done ===")
+        logging.info(f"Article published: {filename}")
     except Exception as e:
         logging.exception("Fatal error")
         sys.exit(1)
