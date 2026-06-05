@@ -1,23 +1,29 @@
-name: Daily Medical Journal Digest
+name: Daily Journal Article
 
 on:
   schedule:
-    - cron: '0 18 * * *'   # 18:00 UTC daily
-  workflow_dispatch:
+    # Runs every day at 10:00 UTC (adjust as needed)
+    - cron: '0 10 * * *'
+  workflow_dispatch:  # Allows manual trigger from GitHub UI
 
 jobs:
-  publish:
+  generate:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write  # Needed to commit the new article
+
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
-      - name: Setup Python
+
+      - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - name: Install libraries
+
+      - name: Install dependencies
         run: pip install requests
-      - name: Publish digest to website
-        env:
-          WEBSITE_REPO_TOKEN: ${{ secrets.WEBSITE_REPO_TOKEN }}
-        run: python journal_digest.py
+
+      - name: Run article generator
+        run: python scripts/journal_digest.py
+        # No environment variables needed – GITHUB_TOKEN is automatic
