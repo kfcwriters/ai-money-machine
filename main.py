@@ -1,5 +1,5 @@
-import os, sys, logging, textwrap, requests, random, re, html
-import xml.etree.ElementTree as ET          # <-- FIXED: was missing
+import os, sys, logging, textwrap, requests, random, re, html, json
+import xml.etree.ElementTree as ET
 from fpdf import FPDF
 from ai_helper import llm_generate
 
@@ -33,9 +33,7 @@ EVERGREEN_TOPICS = [
     "Side hustle idea validator (quick scorecard)",
 ]
 
-# ---------- TREND SOURCING (FIXED) ----------
 def get_real_trend():
-    """Try Google Trends RSS; fallback to evergreen topic."""
     try:
         rss = "https://trends.google.com/trends/trendingsearches/daily/rss?geo=US"
         resp = requests.get(rss, timeout=30)
@@ -50,12 +48,10 @@ def get_real_trend():
         logging.warning(f"Google Trends failed ({e}), using evergreen topic list.")
     return random.choice(EVERGREEN_TOPICS)
 
-# ---------- PRODUCT GENERATION (FORCED TITLE MATCH) ----------
 def generate_product(problem_title):
-    # Strong instruction: the title MUST include the topic
     prompt = f"""You are a top‑selling digital product creator. Write a 500‑word beginner‑friendly guide that solves: "{problem_title}".
 
-CRITICAL: The guide's title (the first line starting with #) MUST contain the exact phrase "{problem_title}" or a very close, natural rewording of it. For example, if the topic is "Travel packing list for one‑bag minimalists", the title should be "The Ultimate Travel Packing List for One‑Bag Minimalists".
+CRITICAL: The guide's title (the first line starting with #) MUST contain the exact phrase "{problem_title}" or a very close, natural rewording of it.
 
 Use this exact structure in Markdown:
 # [Title that includes "{problem_title}"]
@@ -67,26 +63,20 @@ Use this exact structure in Markdown:
 Make it sound like a ready‑to‑use $5 download. Use simple language. No links or service references."""
     
     raw = llm_generate(prompt)
-    # Extract title from first Markdown heading
     title_match = re.search(r"^#\s*(.+?)$", raw, re.MULTILINE)
     if title_match:
         title = title_match.group(1).strip()
     else:
         title = f"The Complete Guide to {problem_title}"
-
-    # Verify the title contains a decent share of topic words
     topic_words = set(problem_title.lower().split())
     title_words = set(title.lower().split())
     common = topic_words & title_words
     if len(common) < max(1, len(topic_words) * 0.3):
-        logging.warning(f"Title '{title}' didn't match topic '{problem_title}' – forcing proper title.")
+        logging.warning(f"Title mismatch, forcing: {problem_title}")
         title = f"The Complete Guide to {problem_title}"
-    
-    # Remove the title line from body (so it's not duplicated in PDF)
     body = re.sub(r"^#\s*.+?\n", "", raw, count=1).strip()
     return title, body
 
-# ---------- SANITIZE TEXT ----------
 def sanitize_text(text):
     replacements = {
         '\u2018': "'", '\u2019': "'", '\u201c': '"', '\u201d': '"',
@@ -98,7 +88,6 @@ def sanitize_text(text):
         text = text.replace(orig, new)
     return ''.join(ch if ord(ch) < 128 or ch == '\n' else '?' for ch in text)
 
-# ---------- PDF CREATION ----------
 def create_pdf(title, content):
     pdf = FPDF()
     pdf.add_page()
@@ -129,12 +118,9 @@ def create_pdf(title, content):
     pdf.output("product.pdf")
     return "product.pdf"
 
-# ---------- GUMROAD FILE UPLOAD (WORKING) ----------
 def upload_file_to_gumroad(pdf_path):
     file_name = "product.pdf"
     file_size = os.path.getsize(pdf_path)
-
-    # 1. Request presigned upload
     presign_url = "https://api.gumroad.com/v2/files/presign"
     presign_headers = {"Authorization": f"Bearer {GUMROAD_TOKEN}"}
     resp = requests.post(presign_url, headers=presign_headers,
@@ -145,15 +131,11 @@ def upload_file_to_gumroad(pdf_path):
     upload_id = data["upload_id"]
     part = data["parts"][0]
     presigned_url = part["presigned_url"]
-
-    # 2. Upload to S3
     with open(pdf_path, "rb") as f:
         put_resp = requests.put(presigned_url, data=f, headers={"Content-Type": "application/pdf"}, timeout=60)
     if put_resp.status_code not in (200, 201, 204):
         raise Exception(f"S3 upload failed: {put_resp.status_code}")
     etag = put_resp.headers.get("ETag", "")
-
-    # 3. Complete multipart upload
     complete_url = "https://api.gumroad.com/v2/files/complete"
     complete_body = {
         "upload_id": upload_id,
@@ -167,7 +149,6 @@ def upload_file_to_gumroad(pdf_path):
     logging.info("File uploaded to Gumroad successfully.")
     return file_url
 
-# ---------- PUBLISH PRODUCT WITH FILE ----------
 def publish_to_gumroad(ebook_title, pdf_path, problem_title):
     file_url = upload_file_to_gumroad(pdf_path)
 
@@ -178,15 +159,17 @@ def publish_to_gumroad(ebook_title, pdf_path, problem_title):
     product_data = {
         "name": sanitize_text(ebook_title),
         "description": f"This powerful guide solves: **{sanitize_text(problem_title)}**. Instant download.",
-        "price": "499",
-        "published": "true",
+        "price": 499,                # integer cents
+        "published": True,           # boolean, NOT string
         "files": [{"url": file_url}]
     }
     resp = requests.post("https://api.gumroad.com/v2/products",
                          headers=headers, json=product_data, timeout=30)
     if resp.status_code == 200 and resp.json().get("success"):
-        short_url = resp.json()["product"].get("short_url", "no-url")
-        logging.info(f"Gumroad product created with file: {short_url}")
+        product = resp.json()["product"]
+        short_url = product.get("short_url", "no-url")
+        published_status = product.get("published", "unknown")
+        logging.info(f"Gumroad product created with file: {short_url}  | published = {published_status}")
         # Save latest product link for traffic scripts
         with open(".latest_product_url", "w") as f:
             f.write(short_url)
@@ -195,7 +178,6 @@ def publish_to_gumroad(ebook_title, pdf_path, problem_title):
         msg = resp.json().get("message", "Unknown error") if resp.headers.get("content-type","").startswith("application/json") else resp.text
         raise Exception(f"Gumroad product creation failed: {msg}")
 
-# ---------- MAIN ----------
 def main():
     logging.info("=== AI Money Machine Run Starting ===")
     try:
