@@ -1,4 +1,5 @@
 import os, sys, logging, textwrap, requests, random, re, html
+import xml.etree.ElementTree as ET          # <-- FIXED: was missing
 from fpdf import FPDF
 from ai_helper import llm_generate
 
@@ -38,7 +39,6 @@ def get_real_trend():
     try:
         rss = "https://trends.google.com/trends/trendingsearches/daily/rss?geo=US"
         resp = requests.get(rss, timeout=30)
-        # Decode HTML entities properly
         clean_text = html.unescape(resp.text)
         root = ET.fromstring(clean_text)
         titles = [item.find("title").text for item in root.findall(".//item") if item.find("title") is not None]
@@ -55,7 +55,7 @@ def generate_product(problem_title):
     # Strong instruction: the title MUST include the topic
     prompt = f"""You are a top‑selling digital product creator. Write a 500‑word beginner‑friendly guide that solves: "{problem_title}".
 
-IMPORTANT: The title of the guide (the first line starting with #) MUST contain the exact words "{problem_title}" or a very close variation. For example, if the topic is "Travel packing list for one‑bag minimalists", the title MUST be something like "The Ultimate Travel Packing List for One‑Bag Minimalists".
+CRITICAL: The guide's title (the first line starting with #) MUST contain the exact phrase "{problem_title}" or a very close, natural rewording of it. For example, if the topic is "Travel packing list for one‑bag minimalists", the title should be "The Ultimate Travel Packing List for One‑Bag Minimalists".
 
 Use this exact structure in Markdown:
 # [Title that includes "{problem_title}"]
@@ -64,7 +64,7 @@ Use this exact structure in Markdown:
 ## Quick Checklist (5‑7 items)
 ## One‑line encouragement
 
-Make it feel like a ready‑to‑use $5 download. Use simple language. No links or service references."""
+Make it sound like a ready‑to‑use $5 download. Use simple language. No links or service references."""
     
     raw = llm_generate(prompt)
     # Extract title from first Markdown heading
@@ -72,19 +72,17 @@ Make it feel like a ready‑to‑use $5 download. Use simple language. No links 
     if title_match:
         title = title_match.group(1).strip()
     else:
-        # Fallback: create a title from the topic
         title = f"The Complete Guide to {problem_title}"
 
-    # If the title doesn't contain the topic words, force it
-    # Check if at least half the topic words appear
+    # Verify the title contains a decent share of topic words
     topic_words = set(problem_title.lower().split())
     title_words = set(title.lower().split())
     common = topic_words & title_words
-    if len(common) < len(topic_words) * 0.3:
-        logging.warning(f"Title '{title}' doesn't match topic '{problem_title}' – forcing a new title.")
+    if len(common) < max(1, len(topic_words) * 0.3):
+        logging.warning(f"Title '{title}' didn't match topic '{problem_title}' – forcing proper title.")
         title = f"The Complete Guide to {problem_title}"
     
-    # Remove the title line from the body so it doesn’t appear twice in the PDF
+    # Remove the title line from body (so it's not duplicated in PDF)
     body = re.sub(r"^#\s*.+?\n", "", raw, count=1).strip()
     return title, body
 
@@ -189,6 +187,7 @@ def publish_to_gumroad(ebook_title, pdf_path, problem_title):
     if resp.status_code == 200 and resp.json().get("success"):
         short_url = resp.json()["product"].get("short_url", "no-url")
         logging.info(f"Gumroad product created with file: {short_url}")
+        # Save latest product link for traffic scripts
         with open(".latest_product_url", "w") as f:
             f.write(short_url)
         return short_url
