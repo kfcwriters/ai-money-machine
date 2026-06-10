@@ -3,7 +3,8 @@ from pathlib import Path
 import numpy as np
 from moviepy import VideoFileClip, AudioFileClip, CompositeVideoClip, ImageClip
 from PIL import Image, ImageDraw, ImageFont
-from ai_helper import llm_generate   # <-- bulletproof AI
+from ai_helper import llm_generate
+from get_link import get_latest_product_link
 
 logging.basicConfig(
     level=logging.INFO,
@@ -11,12 +12,13 @@ logging.basicConfig(
     format="%(asctime)s - %(levelname)s - %(message)s",
 )
 
-OPENROUTER_API_KEY = None   # no longer used, kept for backward compatibility if needed elsewhere
+OPENROUTER_API_KEY = None   # not used
 PIXABAY_API_KEY = os.environ["PIXABAY_API_KEY"]
 TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 TELEGRAM_CHANNEL_ID = os.environ["TELEGRAM_CHANNEL_ID"]
+PRODUCT_LINK = get_latest_product_link("https://kfcwriters.github.io")   # <-- FIX
 
-VIDEO_WIDTH, VIDEO_HEIGHT = 1080, 1920  # 9:16 vertical for shorts
+VIDEO_WIDTH, VIDEO_HEIGHT = 1080, 1920
 OUTPUT_FILE = "final_video.mp4"
 FONT_PATH = "font.ttf"
 VOICE_NAME = "en-US-AriaNeural"
@@ -33,7 +35,6 @@ TOPICS = [
     "How to write an effective abstract for your research paper",
 ]
 
-# ─────────────── 1. GENERATE SCRIPT (using bulletproof AI) ───────────────
 def generate_script(topic):
     prompt = f"""You are a professional scriptwriter for short educational videos. Write a 60-second video script about: "{topic}"
 
@@ -41,7 +42,7 @@ Rules:
 - Format as plain text with 5-8 short lines (each line one sentence).
 - Each line will become one scene with its own stock footage.
 - Keep sentences short and punchy. Use simple language.
-- Start with a hook. End with a call-to-action: "Need professional medical writing help? Visit kfcwriters.github.io"
+- End with a call-to-action: 'Need a step-by-step guide? Download my medical writing checklist at {PRODUCT_LINK} for only $4.99.'
 - Do NOT include scene numbers, timestamps, or any formatting. Just the sentences.
 
 Script:"""
@@ -50,7 +51,6 @@ Script:"""
     logging.info(f"Script generated: {len(lines)} lines")
     return lines
 
-# ─────────────── 2. TTS (unchanged) ───────────────
 async def generate_voiceover(script_lines):
     full_text = " ".join(script_lines)
     audio_file = "voiceover.mp3"
@@ -62,7 +62,6 @@ async def generate_voiceover(script_lines):
     logging.info("Voiceover generated.")
     return audio_file
 
-# ─────────────── 3. STOCK FOOTAGE (unchanged) ───────────────
 def fetch_stock_videos(script_lines):
     video_paths = []
     for i, line in enumerate(script_lines):
@@ -86,7 +85,7 @@ def fetch_stock_videos(script_lines):
                 logging.info(f"Stock {i} downloaded.")
                 continue
         # fallback
-        fallback_url = f"https://pixabay.com/api/videos/?key={PIXABAY_API_KEY}&q=love&per_page=1&min_width=1920"
+        fallback_url = f"https://pixabay.com/api/videos/?key={PIXABAY_API_KEY}&q=writing&per_page=1&min_width=1920"
         fresp = requests.get(fallback_url, timeout=30)
         if fresp.status_code == 200:
             fdata = fresp.json()
@@ -104,7 +103,6 @@ def fetch_stock_videos(script_lines):
     logging.info(f"Total stock clips: {len(video_paths)}")
     return video_paths
 
-# ─────────────── 4. SUBTITLES (unchanged) ───────────────
 def create_subtitle_image(text, width, height):
     img = Image.new("RGBA", (width, height), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
@@ -125,7 +123,6 @@ def create_subtitle_image(text, width, height):
     arr = np.array(img)
     return arr
 
-# ─────────────── 5. ASSEMBLE VIDEO (unchanged) ───────────────
 def assemble_video(script_lines, video_paths, audio_path):
     audio = AudioFileClip(audio_path)
     total_duration = audio.duration
@@ -158,19 +155,18 @@ def assemble_video(script_lines, video_paths, audio_path):
                           preset="ultrafast", threads=2)
     logging.info(f"Video saved to {OUTPUT_FILE}")
 
-# ─────────────── 6. UPLOAD TO TELEGRAM (unchanged) ───────────────
 def upload_to_telegram(video_path):
     url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendVideo"
+    caption = f"🩺 Daily medical writing tip! Download the full checklist: {PRODUCT_LINK}"
     with open(video_path, "rb") as f:
         files = {"video": f}
-        data = {"chat_id": TELEGRAM_CHANNEL_ID, "caption": "📹 New daily medical writing video is ready!"}
+        data = {"chat_id": TELEGRAM_CHANNEL_ID, "caption": caption}
         resp = requests.post(url, data=data, files=files, timeout=60)
     if resp.status_code == 200:
-        logging.info("Video posted to Telegram channel!")
+        logging.info("Video posted to Telegram channel with product link!")
     else:
         logging.error(f"Telegram upload failed: {resp.status_code} {resp.text}")
 
-# ─────────────── MAIN ───────────────
 async def main():
     logging.info("=== Medical Writing Video Generator ===")
     try:
