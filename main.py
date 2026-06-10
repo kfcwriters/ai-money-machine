@@ -149,18 +149,6 @@ def upload_file_to_gumroad(pdf_path):
     logging.info("File uploaded to Gumroad successfully.")
     return file_url
 
-def publish_product(product_id):
-    """Explicitly publish a product by its ID."""
-    publish_url = f"https://api.gumroad.com/v2/products/{product_id}/publish"
-    headers = {"Authorization": f"Bearer {GUMROAD_TOKEN}"}
-    resp = requests.post(publish_url, headers=headers, json={}, timeout=30)
-    if resp.status_code == 200:
-        logging.info(f"Product {product_id} published successfully via API.")
-        return True
-    else:
-        logging.warning(f"Publish call returned {resp.status_code}: {resp.text}")
-        return False
-
 def publish_to_gumroad(ebook_title, pdf_path, problem_title):
     file_url = upload_file_to_gumroad(pdf_path)
 
@@ -172,7 +160,7 @@ def publish_to_gumroad(ebook_title, pdf_path, problem_title):
         "name": sanitize_text(ebook_title),
         "description": f"This powerful guide solves: **{sanitize_text(problem_title)}**. Instant download.",
         "price": 499,
-        "published": True,        # might be ignored, but we'll force-publish next
+        "published": True,       # We'll try to enforce after creation
         "files": [{"url": file_url}]
     }
     resp = requests.post("https://api.gumroad.com/v2/products",
@@ -180,17 +168,28 @@ def publish_to_gumroad(ebook_title, pdf_path, problem_title):
     if resp.status_code == 200 and resp.json().get("success"):
         product = resp.json()["product"]
         short_url = product.get("short_url", "no-url")
-        published_status = product.get("published", False)
         product_id = product["id"]
+        published_status = product.get("published", False)
         logging.info(f"Product created: {short_url} (published={published_status})")
 
-        # Force-publish if not already published
+        # If not published, attempt to update via PUT
         if not published_status:
-            logging.info("Product not published – forcing publication now...")
-            publish_product(product_id)
-            # Optionally re-fetch to confirm, but we trust the publish call
+            update_url = f"https://api.gumroad.com/v2/products/{product_id}"
+            update_data = {"published": True}
+            update_resp = requests.put(update_url, headers=headers, json=update_data, timeout=30)
+            if update_resp.status_code == 200:
+                new_published = update_resp.json().get("product", {}).get("published", False)
+                if new_published:
+                    logging.info("✅ Product published via PUT update.")
+                else:
+                    logging.warning("PUT update succeeded but published still False.")
+            else:
+                logging.warning(f"PUT update failed ({update_resp.status_code}). Product remains unpublished.")
+                logging.warning("You can publish all products manually in Gumroad dashboard: Select all → Publish.")
+        else:
+            logging.info("Product already published.")
 
-        # Save link for traffic scripts
+        # Save latest product link for traffic scripts
         with open(".latest_product_url", "w") as f:
             f.write(short_url)
         return short_url
