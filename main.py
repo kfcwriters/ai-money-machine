@@ -1,4 +1,4 @@
-import os, sys, logging, textwrap, requests, random, re, html, json
+import os, sys, logging, textwrap, requests, random, re, html
 import xml.etree.ElementTree as ET
 from fpdf import FPDF
 from ai_helper import llm_generate
@@ -7,7 +7,8 @@ logging.basicConfig(level=logging.INFO, stream=sys.stdout,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 
 GUMROAD_TOKEN = os.environ["GUMROAD_TOKEN"]
-HIRE_ME_URL = os.environ.get("HIRE_ME_URL", "https://kfcwriters.github.io")
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 
 # ---------- EVERGREEN TOPICS ----------
 EVERGREEN_TOPICS = [
@@ -33,6 +34,7 @@ EVERGREEN_TOPICS = [
     "Side hustle idea validator (quick scorecard)",
 ]
 
+# ---------- TREND ----------
 def get_real_trend():
     try:
         rss = "https://trends.google.com/trends/trendingsearches/daily/rss?geo=US"
@@ -48,6 +50,7 @@ def get_real_trend():
         logging.warning(f"Google Trends failed ({e}), using evergreen topic list.")
     return random.choice(EVERGREEN_TOPICS)
 
+# ---------- PRODUCT ----------
 def generate_product(problem_title):
     prompt = f"""You are a top‑selling digital product creator. Write a 500‑word beginner‑friendly guide that solves: "{problem_title}".
 
@@ -61,7 +64,6 @@ Use this exact structure in Markdown:
 ## One‑line encouragement
 
 Make it sound like a ready‑to‑use $5 download. Use simple language. No links or service references."""
-    
     raw = llm_generate(prompt)
     title_match = re.search(r"^#\s*(.+?)$", raw, re.MULTILINE)
     if title_match:
@@ -149,9 +151,22 @@ def upload_file_to_gumroad(pdf_path):
     logging.info("File uploaded to Gumroad successfully.")
     return file_url
 
+def send_telegram_notification(product_name, product_id, short_url):
+    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
+        return
+    edit_url = f"https://app.gumroad.com/products/{product_id}/edit"
+    message = f"📦 New draft ready: **{product_name}**\n🔗 [Publish with one tap]({edit_url})\n🌐 {short_url}"
+    try:
+        requests.post(
+            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
+            json={"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "Markdown", "disable_web_page_preview": True},
+            timeout=10
+        )
+    except:
+        pass
+
 def publish_to_gumroad(ebook_title, pdf_path, problem_title):
     file_url = upload_file_to_gumroad(pdf_path)
-
     headers = {
         "Authorization": f"Bearer {GUMROAD_TOKEN}",
         "Content-Type": "application/json"
@@ -160,7 +175,6 @@ def publish_to_gumroad(ebook_title, pdf_path, problem_title):
         "name": sanitize_text(ebook_title),
         "description": f"This powerful guide solves: **{sanitize_text(problem_title)}**. Instant download.",
         "price": 499,
-        "published": True,       # We'll try to enforce after creation
         "files": [{"url": file_url}]
     }
     resp = requests.post("https://api.gumroad.com/v2/products",
@@ -169,29 +183,12 @@ def publish_to_gumroad(ebook_title, pdf_path, problem_title):
         product = resp.json()["product"]
         short_url = product.get("short_url", "no-url")
         product_id = product["id"]
-        published_status = product.get("published", False)
-        logging.info(f"Product created: {short_url} (published={published_status})")
-
-        # If not published, attempt to update via PUT
-        if not published_status:
-            update_url = f"https://api.gumroad.com/v2/products/{product_id}"
-            update_data = {"published": True}
-            update_resp = requests.put(update_url, headers=headers, json=update_data, timeout=30)
-            if update_resp.status_code == 200:
-                new_published = update_resp.json().get("product", {}).get("published", False)
-                if new_published:
-                    logging.info("✅ Product published via PUT update.")
-                else:
-                    logging.warning("PUT update succeeded but published still False.")
-            else:
-                logging.warning(f"PUT update failed ({update_resp.status_code}). Product remains unpublished.")
-                logging.warning("You can publish all products manually in Gumroad dashboard: Select all → Publish.")
-        else:
-            logging.info("Product already published.")
-
+        logging.info(f"✅ Product created: {short_url}")
         # Save latest product link for traffic scripts
         with open(".latest_product_url", "w") as f:
             f.write(short_url)
+        # Send Telegram publish reminder
+        send_telegram_notification(ebook_title, product_id, short_url)
         return short_url
     else:
         msg = resp.json().get("message", "Unknown error") if resp.headers.get("content-type","").startswith("application/json") else resp.text
