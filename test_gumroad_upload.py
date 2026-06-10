@@ -4,9 +4,9 @@ from fpdf import FPDF
 TOKEN = os.environ["GUMROAD_TOKEN"]
 PDF_PATH = "test_product.pdf"
 
-print("=== Gumroad Upload Test ===")
+print("=== Gumroad Upload Test (v3) ===")
 
-# Create a simple test PDF
+# Create test PDF
 pdf = FPDF()
 pdf.add_page()
 pdf.set_font("Helvetica", size=12)
@@ -22,51 +22,42 @@ resp = requests.post(
     timeout=30
 )
 print("Presign status:", resp.status_code)
-print("Presign response JSON:", json.dumps(resp.json(), indent=2))   # <-- SEE EVERYTHING
-
 if resp.status_code != 200:
-    print("❌ Presign failed.")
+    print("❌ Presign failed:", resp.text)
     sys.exit(1)
 
 data = resp.json()
+print("Presign response:", json.dumps(data, indent=2))
 
-# Try multiple possible keys (Gumroad documentation varies)
-upload_url = data.get("upload_url") or data.get("url") or data.get("presigned_url")
-file_id = data.get("id") or data.get("file_id")
+upload_id = data["upload_id"]
+part = data["parts"][0]
+presigned_url = part["presigned_url"]
 
-if not upload_url or not file_id:
-    print("❌ Missing upload_url or file_id. Full response above.")
-    sys.exit(1)
-
-print(f"✅ Using upload_url: {upload_url[:80]}...")
-print(f"✅ File ID: {file_id}")
-
-# 2. Upload to S3
+# 2. Upload to the presigned URL
 with open(PDF_PATH, "rb") as f:
-    put_resp = requests.put(upload_url, data=f, headers={"Content-Type": "application/pdf"}, timeout=60)
+    put_resp = requests.put(presigned_url, data=f, headers={"Content-Type": "application/pdf"}, timeout=60)
 print("S3 upload status:", put_resp.status_code)
 if put_resp.status_code not in (200, 201, 204):
-    print("❌ S3 upload failed.")
+    print("❌ Upload failed.")
     sys.exit(1)
-print("✅ File uploaded to S3.")
+print("✅ File uploaded.")
 
-# 3. Complete
+# 3. Complete multipart upload
 resp = requests.post(
     "https://api.gumroad.com/v2/files/complete",
     headers={"Authorization": f"Bearer {TOKEN}"},
-    json={"id": file_id},
+    json={"upload_id": upload_id},      # this is the key
     timeout=30
 )
-print("Complete status:", resp.status_code)
-print("Complete response:", resp.text[:200])
+print("Complete status:", resp.status_code, resp.text[:200])
 if resp.status_code != 200:
-    print("❌ File completion failed.")
+    print("❌ Completion failed.")
     sys.exit(1)
 
-file_url = resp.json()["url"]
+file_url = data["file_url"]   # this was already given; we can also use the completion response
 print(f"✅ File ready: {file_url}")
 
-# 4. Create a test product
+# 4. Create product with file
 product_data = {
     "name": "Test Product (auto)",
     "description": "Temporary test product.",
