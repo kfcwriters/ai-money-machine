@@ -1,4 +1,4 @@
-import os, sys, requests
+import os, sys, requests, json
 from fpdf import FPDF
 
 TOKEN = os.environ["GUMROAD_TOKEN"]
@@ -9,31 +9,44 @@ print("=== Gumroad Upload Test ===")
 # Create a simple test PDF
 pdf = FPDF()
 pdf.add_page()
-pdf.set_font("Helvetica", size=12)   # avoid deprecation warning
+pdf.set_font("Helvetica", size=12)
 pdf.cell(200, 10, text="Test PDF content for Gumroad upload verification.")
 pdf.output(PDF_PATH)
 print("✅ Test PDF created.")
 
-# 1. Presign – use "filename" (not "file_name")
+# 1. Presign
 resp = requests.post(
     "https://api.gumroad.com/v2/files/presign",
     headers={"Authorization": f"Bearer {TOKEN}"},
-    json={"filename": "test.pdf", "file_size": os.path.getsize(PDF_PATH)},   # <-- FIXED
+    json={"filename": "test.pdf", "file_size": os.path.getsize(PDF_PATH)},
     timeout=30
 )
+print("Presign status:", resp.status_code)
+print("Presign response JSON:", json.dumps(resp.json(), indent=2))   # <-- SEE EVERYTHING
+
 if resp.status_code != 200:
-    print(f"❌ Presign failed: {resp.status_code} {resp.text}")
+    print("❌ Presign failed.")
     sys.exit(1)
+
 data = resp.json()
-upload_url = data["upload_url"]
-file_id = data["id"]
-print("✅ Got presigned URL.")
+
+# Try multiple possible keys (Gumroad documentation varies)
+upload_url = data.get("upload_url") or data.get("url") or data.get("presigned_url")
+file_id = data.get("id") or data.get("file_id")
+
+if not upload_url or not file_id:
+    print("❌ Missing upload_url or file_id. Full response above.")
+    sys.exit(1)
+
+print(f"✅ Using upload_url: {upload_url[:80]}...")
+print(f"✅ File ID: {file_id}")
 
 # 2. Upload to S3
 with open(PDF_PATH, "rb") as f:
     put_resp = requests.put(upload_url, data=f, headers={"Content-Type": "application/pdf"}, timeout=60)
+print("S3 upload status:", put_resp.status_code)
 if put_resp.status_code not in (200, 201, 204):
-    print(f"❌ S3 upload failed: {put_resp.status_code}")
+    print("❌ S3 upload failed.")
     sys.exit(1)
 print("✅ File uploaded to S3.")
 
@@ -44,13 +57,16 @@ resp = requests.post(
     json={"id": file_id},
     timeout=30
 )
+print("Complete status:", resp.status_code)
+print("Complete response:", resp.text[:200])
 if resp.status_code != 200:
-    print(f"❌ File completion failed: {resp.status_code} {resp.text}")
+    print("❌ File completion failed.")
     sys.exit(1)
+
 file_url = resp.json()["url"]
 print(f"✅ File ready: {file_url}")
 
-# 4. Create a test product (unpublished, 99 cents)
+# 4. Create a test product
 product_data = {
     "name": "Test Product (auto)",
     "description": "Temporary test product.",
