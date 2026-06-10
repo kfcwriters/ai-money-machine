@@ -9,16 +9,16 @@ print("=== Gumroad Upload Test ===")
 # Create a simple test PDF
 pdf = FPDF()
 pdf.add_page()
-pdf.set_font("Arial", size=12)
+pdf.set_font("Helvetica", size=12)   # avoid deprecation warning
 pdf.cell(200, 10, text="Test PDF content for Gumroad upload verification.")
 pdf.output(PDF_PATH)
 print("✅ Test PDF created.")
 
-# 1. Presign
+# 1. Presign – use "filename" (not "file_name")
 resp = requests.post(
     "https://api.gumroad.com/v2/files/presign",
     headers={"Authorization": f"Bearer {TOKEN}"},
-    json={"file_name": "test.pdf", "file_size": os.path.getsize(PDF_PATH)},
+    json={"filename": "test.pdf", "file_size": os.path.getsize(PDF_PATH)},   # <-- FIXED
     timeout=30
 )
 if resp.status_code != 200:
