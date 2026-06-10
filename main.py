@@ -1,4 +1,4 @@
-import os, sys, logging, textwrap, requests, random, re, xml.etree.ElementTree as ET
+import os, sys, logging, textwrap, requests, random, re, html
 from fpdf import FPDF
 from ai_helper import llm_generate
 
@@ -8,7 +8,7 @@ logging.basicConfig(level=logging.INFO, stream=sys.stdout,
 GUMROAD_TOKEN = os.environ["GUMROAD_TOKEN"]
 HIRE_ME_URL = os.environ.get("HIRE_ME_URL", "https://kfcwriters.github.io")
 
-# ---------- EVERGREEN TOPICS (fallback if trends fail) ----------
+# ---------- EVERGREEN TOPICS ----------
 EVERGREEN_TOPICS = [
     "How to build a morning routine that actually sticks",
     "5‑minute daily journaling template for mental clarity",
@@ -32,15 +32,15 @@ EVERGREEN_TOPICS = [
     "Side hustle idea validator (quick scorecard)",
 ]
 
-# ---------- TREND SOURCING ----------
+# ---------- TREND SOURCING (FIXED) ----------
 def get_real_trend():
-    """Try Google Trends RSS; if it fails, return a random evergreen topic."""
+    """Try Google Trends RSS; fallback to evergreen topic."""
     try:
         rss = "https://trends.google.com/trends/trendingsearches/daily/rss?geo=US"
         resp = requests.get(rss, timeout=30)
-        # The RSS often contains unescaped HTML entities – fix them
-        text = resp.text.replace("&", "&amp;")
-        root = ET.fromstring(text)
+        # Decode HTML entities properly
+        clean_text = html.unescape(resp.text)
+        root = ET.fromstring(clean_text)
         titles = [item.find("title").text for item in root.findall(".//item") if item.find("title") is not None]
         if titles:
             chosen = random.choice(titles)
@@ -50,27 +50,40 @@ def get_real_trend():
         logging.warning(f"Google Trends failed ({e}), using evergreen topic list.")
     return random.choice(EVERGREEN_TOPICS)
 
-# ---------- PRODUCT GENERATION (improved prompt) ----------
+# ---------- PRODUCT GENERATION (FORCED TITLE MATCH) ----------
 def generate_product(problem_title):
+    # Strong instruction: the title MUST include the topic
     prompt = f"""You are a top‑selling digital product creator. Write a 500‑word beginner‑friendly guide that solves: "{problem_title}".
 
+IMPORTANT: The title of the guide (the first line starting with #) MUST contain the exact words "{problem_title}" or a very close variation. For example, if the topic is "Travel packing list for one‑bag minimalists", the title MUST be something like "The Ultimate Travel Packing List for One‑Bag Minimalists".
+
 Use this exact structure in Markdown:
-# [Catchy Title Here – must include the main topic]
+# [Title that includes "{problem_title}"]
 ## Introduction (1 empathetic paragraph)
 ## 5 Actionable Steps (bulleted)
 ## Quick Checklist (5‑7 items)
 ## One‑line encouragement
 
 Make it feel like a ready‑to‑use $5 download. Use simple language. No links or service references."""
+    
     raw = llm_generate(prompt)
     # Extract title from first Markdown heading
     title_match = re.search(r"^#\s*(.+?)$", raw, re.MULTILINE)
     if title_match:
         title = title_match.group(1).strip()
     else:
-        # Fallback: take first non‑empty line
-        lines = [l.strip() for l in raw.split("\n") if l.strip()]
-        title = lines[0] if lines else problem_title
+        # Fallback: create a title from the topic
+        title = f"The Complete Guide to {problem_title}"
+
+    # If the title doesn't contain the topic words, force it
+    # Check if at least half the topic words appear
+    topic_words = set(problem_title.lower().split())
+    title_words = set(title.lower().split())
+    common = topic_words & title_words
+    if len(common) < len(topic_words) * 0.3:
+        logging.warning(f"Title '{title}' doesn't match topic '{problem_title}' – forcing a new title.")
+        title = f"The Complete Guide to {problem_title}"
+    
     # Remove the title line from the body so it doesn’t appear twice in the PDF
     body = re.sub(r"^#\s*.+?\n", "", raw, count=1).strip()
     return title, body
@@ -118,13 +131,12 @@ def create_pdf(title, content):
     pdf.output("product.pdf")
     return "product.pdf"
 
-# ---------- GUMROAD FILE UPLOAD (presigned flow – WORKING) ----------
+# ---------- GUMROAD FILE UPLOAD (WORKING) ----------
 def upload_file_to_gumroad(pdf_path):
-    """Upload a file via Gumroad’s presigned S3 flow. Returns the final file URL."""
     file_name = "product.pdf"
     file_size = os.path.getsize(pdf_path)
 
-    # 1. Request a presigned upload
+    # 1. Request presigned upload
     presign_url = "https://api.gumroad.com/v2/files/presign"
     presign_headers = {"Authorization": f"Bearer {GUMROAD_TOKEN}"}
     resp = requests.post(presign_url, headers=presign_headers,
@@ -136,14 +148,14 @@ def upload_file_to_gumroad(pdf_path):
     part = data["parts"][0]
     presigned_url = part["presigned_url"]
 
-    # 2. Upload the file to the S3 presigned URL
+    # 2. Upload to S3
     with open(pdf_path, "rb") as f:
         put_resp = requests.put(presigned_url, data=f, headers={"Content-Type": "application/pdf"}, timeout=60)
     if put_resp.status_code not in (200, 201, 204):
         raise Exception(f"S3 upload failed: {put_resp.status_code}")
     etag = put_resp.headers.get("ETag", "")
 
-    # 3. Complete the multipart upload
+    # 3. Complete multipart upload
     complete_url = "https://api.gumroad.com/v2/files/complete"
     complete_body = {
         "upload_id": upload_id,
@@ -177,7 +189,6 @@ def publish_to_gumroad(ebook_title, pdf_path, problem_title):
     if resp.status_code == 200 and resp.json().get("success"):
         short_url = resp.json()["product"].get("short_url", "no-url")
         logging.info(f"Gumroad product created with file: {short_url}")
-        # Save latest product link for traffic scripts
         with open(".latest_product_url", "w") as f:
             f.write(short_url)
         return short_url
