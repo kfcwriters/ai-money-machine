@@ -4,9 +4,9 @@ from fpdf import FPDF
 TOKEN = os.environ["GUMROAD_TOKEN"]
 PDF_PATH = "test_product.pdf"
 
-print("=== Gumroad Upload Test (v3) ===")
+print("=== Gumroad Upload Test (Final) ===")
 
-# Create test PDF
+# Create a simple test PDF
 pdf = FPDF()
 pdf.add_page()
 pdf.set_font("Helvetica", size=12)
@@ -33,31 +33,36 @@ upload_id = data["upload_id"]
 part = data["parts"][0]
 presigned_url = part["presigned_url"]
 
-# 2. Upload to the presigned URL
+# 2. Upload to the presigned S3 URL
 with open(PDF_PATH, "rb") as f:
     put_resp = requests.put(presigned_url, data=f, headers={"Content-Type": "application/pdf"}, timeout=60)
 print("S3 upload status:", put_resp.status_code)
 if put_resp.status_code not in (200, 201, 204):
     print("❌ Upload failed.")
     sys.exit(1)
-print("✅ File uploaded.")
+print("✅ File uploaded to S3.")
 
-# 3. Complete multipart upload
+# 3. Complete multipart upload – send BOTH upload_id and key
 resp = requests.post(
     "https://api.gumroad.com/v2/files/complete",
     headers={"Authorization": f"Bearer {TOKEN}"},
-    json={"upload_id": upload_id},      # this is the key
+    json={
+        "upload_id": upload_id,
+        "key": data["key"]               # <-- required
+    },
     timeout=30
 )
-print("Complete status:", resp.status_code, resp.text[:200])
+print("Complete status:", resp.status_code, resp.text[:300])
 if resp.status_code != 200:
     print("❌ Completion failed.")
     sys.exit(1)
 
-file_url = data["file_url"]   # this was already given; we can also use the completion response
+# Use the URL from the completion response (it usually returns a "url" field)
+completed_data = resp.json()
+file_url = completed_data.get("url") or data["file_url"]
 print(f"✅ File ready: {file_url}")
 
-# 4. Create product with file
+# 4. Create a test product (unpublished, $0.99)
 product_data = {
     "name": "Test Product (auto)",
     "description": "Temporary test product.",
