@@ -1,16 +1,32 @@
-import os, sys, logging, textwrap, requests
+import os, sys, logging, textwrap, requests, xml.etree.ElementTree as ET, random
 from fpdf import FPDF
 from ai_helper import llm_generate
 
-logging.basicConfig(level=logging.INFO, stream=sys.stdout, format='%(asctime)s - %(levelname)s - %(message)s')
+logging.basicConfig(level=logging.INFO, stream=sys.stdout,
+                    format='%(asctime)s - %(levelname)s - %(message)s')
 
-# ---------- API KEYS ----------
 GUMROAD_TOKEN = os.environ["GUMROAD_TOKEN"]
-HIRE_ME_URL = os.environ.get("HIRE_ME_URL", "")
+HIRE_ME_URL = os.environ.get("HIRE_ME_URL", "https://kfcwriters.github.io")
 
-# ---------- TRENDING PROBLEM ----------
+# ---------- REAL TRENDING TOPIC (Google Trends) ----------
+def get_real_trend():
+    """Fetch trending searches from Google Trends daily RSS (free, no key)."""
+    try:
+        rss = "https://trends.google.com/trends/trendingsearches/daily/rss?geo=US"
+        resp = requests.get(rss, timeout=30)
+        root = ET.fromstring(resp.text)
+        titles = [item.find("title").text for item in root.findall(".//item") if item.find("title") is not None]
+        if titles:
+            chosen = random.choice(titles)
+            logging.info(f"Google Trend found: {chosen}")
+            return chosen
+    except Exception as e:
+        logging.warning(f"Google Trends failed ({e}), falling back to AI generated")
+    # fallback to AI hallucination
+    return get_trending_problem()
+
 def get_trending_problem():
-    prompt = "You are a market researcher. Suggest ONE specific, popular problem people are actively searching for in the self-improvement, productivity, or side hustle space. It should be something that could be solved with a short $5 digital guide. Only return the problem title as a single sentence. Example: \"How to create a morning routine that actually sticks\""
+    prompt = "You are a market researcher. Suggest ONE specific, popular problem people are actively searching for in the self-improvement, productivity, or side hustle space. It should be something that could be solved with a short $5 digital guide. Only return the problem title as a single sentence."
     return llm_generate(prompt).strip().strip('"')
 
 # ---------- PRODUCT CONTENT ----------
@@ -59,7 +75,7 @@ def create_pdf(title, content):
     pdf.output("product.pdf")
     return "product.pdf"
 
-# ---------- GUMROAD (product only – file upload skipped) ----------
+# ---------- GUMROAD PUBLISH + ATTACH PDF ----------
 def publish_to_gumroad(ebook_title, pdf_path, problem_title):
     headers = {"Authorization": f"Bearer {GUMROAD_TOKEN}"}
     data = {
@@ -69,22 +85,35 @@ def publish_to_gumroad(ebook_title, pdf_path, problem_title):
         "published": "true",
     }
     resp = requests.post("https://api.gumroad.com/v2/products", headers=headers, data=data, timeout=30)
-    if resp.status_code == 200 and resp.json().get("success"):
-        short_url = resp.json()["product"].get("short_url", "no-url")
-        logging.info(f"Gumroad product created: {short_url}")
-        logging.info("Note: PDF file not attached automatically. Upload it manually at your convenience.")
-        return short_url
-    else:
+    if resp.status_code != 200 or not resp.json().get("success"):
         msg = resp.json().get("message", "Unknown error") if resp.headers.get("content-type","").startswith("application/json") else resp.text
         logging.error(f"Product creation failed: {msg}")
         raise Exception(f"Gumroad API error: {msg}")
+
+    product_id = resp.json()["product"]["id"]
+    short_url = resp.json()["product"].get("short_url", "no-url")
+    logging.info(f"Gumroad product created: {short_url}")
+
+    # --- ATTACH THE PDF FILE (FIX #1) ---
+    upload_url = f"https://api.gumroad.com/v2/products/{product_id}/variant_files"
+    with open(pdf_path, "rb") as f:
+        files = {"file": ("product.pdf", f, "application/pdf")}
+        upload_resp = requests.post(upload_url, headers=headers, files=files, timeout=60)
+    if upload_resp.status_code == 200:
+        logging.info("PDF file attached successfully!")
+    else:
+        logging.warning(f"File upload failed: {upload_resp.text} – product is live but without file")
+    # --- SAVE LINK FOR OTHER SCRIPTS ---
+    with open(".latest_product_url", "w") as f:
+        f.write(short_url)
+    return short_url
 
 # ---------- MAIN ----------
 def main():
     logging.info("=== AI Money Machine Run Starting ===")
     try:
-        problem = get_trending_problem()
-        logging.info(f"Problem: {problem}")
+        problem = get_real_trend()          # now uses real trends
+        logging.info(f"Trend/Problem: {problem}")
         ebook_title, ebook_md = generate_product(problem)
         logging.info(f"Product title: {ebook_title}")
         pdf_path = create_pdf(ebook_title, ebook_md)
