@@ -34,12 +34,12 @@ EVERGREEN_TOPICS = [
 
 # ---------- TREND SOURCING ----------
 def get_real_trend():
-    """Return a trending search from Google Trends RSS, or fallback to evergreen."""
+    """Try Google Trends RSS; if it fails, return a random evergreen topic."""
     try:
         rss = "https://trends.google.com/trends/trendingsearches/daily/rss?geo=US"
         resp = requests.get(rss, timeout=30)
-        # sometimes the response contains HTML entities that break XML; strip them
-        text = resp.text.replace("&", "&amp;")  # crude fix
+        # The RSS often contains unescaped HTML entities – fix them
+        text = resp.text.replace("&", "&amp;")
         root = ET.fromstring(text)
         titles = [item.find("title").text for item in root.findall(".//item") if item.find("title") is not None]
         if titles:
@@ -52,42 +52,42 @@ def get_real_trend():
 
 # ---------- PRODUCT GENERATION (improved prompt) ----------
 def generate_product(problem_title):
-    prompt = f"""You are a top‑selling digital product creator. I need a 500‑word beginner‑friendly guide that solves this problem: "{problem_title}".
+    prompt = f"""You are a top‑selling digital product creator. Write a 500‑word beginner‑friendly guide that solves: "{problem_title}".
 
-Format the answer in Markdown with the following structure:
-# [Catchy Title Here]
-## Introduction (1 paragraph, empathetic)
-## 5 Actionable Steps (each as a bullet list or numbered)
+Use this exact structure in Markdown:
+# [Catchy Title Here – must include the main topic]
+## Introduction (1 empathetic paragraph)
+## 5 Actionable Steps (bulleted)
 ## Quick Checklist (5‑7 items)
 ## One‑line encouragement
 
-Make it feel like a ready‑to‑use $5 download. Do NOT reference links, websites, or services. Use clear, simple language."""
+Make it feel like a ready‑to‑use $5 download. Use simple language. No links or service references."""
     raw = llm_generate(prompt)
-    # extract title from first # heading
+    # Extract title from first Markdown heading
     title_match = re.search(r"^#\s*(.+?)$", raw, re.MULTILINE)
     if title_match:
         title = title_match.group(1).strip()
     else:
-        # fallback: take first non‑empty line
+        # Fallback: take first non‑empty line
         lines = [l.strip() for l in raw.split("\n") if l.strip()]
         title = lines[0] if lines else problem_title
-    # remove the title line from the content so it doesn't appear twice in PDF
+    # Remove the title line from the body so it doesn’t appear twice in the PDF
     body = re.sub(r"^#\s*.+?\n", "", raw, count=1).strip()
     return title, body
 
 # ---------- SANITIZE TEXT ----------
 def sanitize_text(text):
     replacements = {
-        '\u2018':"'", '\u2019':"'", '\u201c':'"', '\u201d':'"',
-        '\u2013':'-', '\u2014':'--', '\u2026':'...', '\u2022':'-',
-        '\u2023':'-', '\u25e6':'-', '\u00a0':' ', '\u00ad':'',
-        '\u00b7':'-'
+        '\u2018': "'", '\u2019': "'", '\u201c': '"', '\u201d': '"',
+        '\u2013': '-', '\u2014': '--', '\u2026': '...', '\u2022': '-',
+        '\u2023': '-', '\u25e6': '-', '\u00a0': ' ', '\u00ad': '',
+        '\u00b7': '-'
     }
     for orig, new in replacements.items():
         text = text.replace(orig, new)
     return ''.join(ch if ord(ch) < 128 or ch == '\n' else '?' for ch in text)
 
-# ---------- PDF CREATION (no uni deprecation) ----------
+# ---------- PDF CREATION ----------
 def create_pdf(title, content):
     pdf = FPDF()
     pdf.add_page()
@@ -118,21 +118,62 @@ def create_pdf(title, content):
     pdf.output("product.pdf")
     return "product.pdf"
 
-# ---------- GUMROAD: CREATE + ATTACH FILE IN ONE REQUEST ----------
+# ---------- GUMROAD FILE UPLOAD (presigned flow – WORKING) ----------
+def upload_file_to_gumroad(pdf_path):
+    """Upload a file via Gumroad’s presigned S3 flow. Returns the final file URL."""
+    file_name = "product.pdf"
+    file_size = os.path.getsize(pdf_path)
+
+    # 1. Request a presigned upload
+    presign_url = "https://api.gumroad.com/v2/files/presign"
+    presign_headers = {"Authorization": f"Bearer {GUMROAD_TOKEN}"}
+    resp = requests.post(presign_url, headers=presign_headers,
+                         json={"filename": file_name, "file_size": file_size}, timeout=30)
+    if resp.status_code != 200:
+        raise Exception(f"Presign failed: {resp.status_code} {resp.text}")
+    data = resp.json()
+    upload_id = data["upload_id"]
+    part = data["parts"][0]
+    presigned_url = part["presigned_url"]
+
+    # 2. Upload the file to the S3 presigned URL
+    with open(pdf_path, "rb") as f:
+        put_resp = requests.put(presigned_url, data=f, headers={"Content-Type": "application/pdf"}, timeout=60)
+    if put_resp.status_code not in (200, 201, 204):
+        raise Exception(f"S3 upload failed: {put_resp.status_code}")
+    etag = put_resp.headers.get("ETag", "")
+
+    # 3. Complete the multipart upload
+    complete_url = "https://api.gumroad.com/v2/files/complete"
+    complete_body = {
+        "upload_id": upload_id,
+        "key": data["key"],
+        "parts": [{"part_number": part["part_number"], "etag": etag}]
+    }
+    resp = requests.post(complete_url, headers=presign_headers, json=complete_body, timeout=30)
+    if resp.status_code != 200:
+        raise Exception(f"File completion failed: {resp.status_code} {resp.text}")
+    file_url = resp.json().get("file_url") or data["file_url"]
+    logging.info("File uploaded to Gumroad successfully.")
+    return file_url
+
+# ---------- PUBLISH PRODUCT WITH FILE ----------
 def publish_to_gumroad(ebook_title, pdf_path, problem_title):
-    headers = {"Authorization": f"Bearer {GUMROAD_TOKEN}"}
-    url = "https://api.gumroad.com/v2/products"
-    data = {
+    file_url = upload_file_to_gumroad(pdf_path)
+
+    headers = {
+        "Authorization": f"Bearer {GUMROAD_TOKEN}",
+        "Content-Type": "application/json"
+    }
+    product_data = {
         "name": sanitize_text(ebook_title),
         "description": f"This powerful guide solves: **{sanitize_text(problem_title)}**. Instant download.",
         "price": "499",
         "published": "true",
+        "files": [{"url": file_url}]
     }
-    # Send multipart form with the file attached
-    with open(pdf_path, "rb") as f:
-        files = {"file": (f"{sanitize_text(ebook_title)[:50]}.pdf", f, "application/pdf")}
-        resp = requests.post(url, headers=headers, data=data, files=files, timeout=30)
-
+    resp = requests.post("https://api.gumroad.com/v2/products",
+                         headers=headers, json=product_data, timeout=30)
     if resp.status_code == 200 and resp.json().get("success"):
         short_url = resp.json()["product"].get("short_url", "no-url")
         logging.info(f"Gumroad product created with file: {short_url}")
@@ -142,8 +183,7 @@ def publish_to_gumroad(ebook_title, pdf_path, problem_title):
         return short_url
     else:
         msg = resp.json().get("message", "Unknown error") if resp.headers.get("content-type","").startswith("application/json") else resp.text
-        logging.error(f"Product creation failed: {msg}")
-        raise Exception(f"Gumroad API error: {msg}")
+        raise Exception(f"Gumroad product creation failed: {msg}")
 
 # ---------- MAIN ----------
 def main():
