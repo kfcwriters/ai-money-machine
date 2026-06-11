@@ -1,0 +1,25 @@
+name: Auto Publish All Gumroad Products
+
+on:
+  workflow_dispatch:   # manual trigger only, for safety
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install playwright
+      - run: playwright install chromium
+      - name: Run publisher
+        env:
+          GUMROAD_EMAIL: ${{ secrets.GUMROAD_EMAIL }}
+          GUMROAD_PASSWORD: ${{ secrets.GUMROAD_PASSWORD }}
+        run: python publish_products.py
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: gumroad-publish-screenshot
+          path: gumroad_after_publish.png
