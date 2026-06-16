@@ -2,7 +2,7 @@ name: Auto-Publish All Gumroad Drafts
 
 on:
   schedule:
-    - cron: '45 8 * * *'          # 08:45 UTC (45 min after product creation)
+    - cron: '45 8 * * *'          # 08:45 UTC
   workflow_dispatch:
 
 jobs:
