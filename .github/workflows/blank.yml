@@ -1,26 +1,44 @@
-name: AI Money Machine Daily Run (Ko‑fi)
+name: AI Money Machine Daily Run (Amazon)
 
 on:
   schedule:
-    - cron: '0 8 * * *'          # Runs every day at 08:00 UTC
-  workflow_dispatch:              # Allows manual trigger
+    - cron: '0 8 * * *'
+  workflow_dispatch:
 
 jobs:
   run-script:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Setup Python
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-
-      - name: Install libraries
-        run: pip install requests fpdf2
-
-      - name: Run the AI Money Machine
+      - run: pip install requests fpdf2 pillow
+      - name: Generate affiliate article
         env:
-          KOFI_API_KEY: ${{ secrets.KOFI_API_KEY }}
+          AMAZON_AFFILIATE_LINK: ${{ secrets.AMAZON_AFFILIATE_LINK }}
         run: python main.py
+      - name: Publish to Dev.to
+        env:
+          DEVTO_API_KEY: ${{ secrets.DEVTO_API_KEY }}
+          AMAZON_AFFILIATE_LINK: ${{ secrets.AMAZON_AFFILIATE_LINK }}
+        run: python medical_seo_article.py
+      - name: Post to Facebook
+        env:
+          FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
+          FB_PAGE_TOKEN: ${{ secrets.FB_PAGE_TOKEN }}
+          AMAZON_AFFILIATE_LINK: ${{ secrets.AMAZON_AFFILIATE_LINK }}
+        run: python fb_daily_post.py
+      - name: Send to Telegram
+        env:
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
+          AMAZON_AFFILIATE_LINK: ${{ secrets.AMAZON_AFFILIATE_LINK }}
+        run: python telegram_pr.py
+      # Uncomment the next step if you have Pinterest credentials set up
+      # - name: Post to Pinterest
+      #   env:
+      #     PINTEREST_ACCESS_TOKEN: ${{ secrets.PINTEREST_ACCESS_TOKEN }}
+      #     PINTEREST_APP_ID: ${{ secrets.PINTEREST_APP_ID }}
+      #     AMAZON_AFFILIATE_LINK: ${{ secrets.AMAZON_AFFILIATE_LINK }}
+      #   run: python medical_pin.py
