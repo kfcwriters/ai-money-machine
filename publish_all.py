@@ -8,18 +8,14 @@ def run():
     cookies_raw = os.environ["GUMROAD_COOKIES"]
     cookies = json.loads(cookies_raw)
 
-    # Sanitize cookies for Playwright
     allowed_same_site = {'Strict', 'Lax', 'None'}
     for c in cookies:
-        # Set a valid sameSite if missing or invalid
         if 'sameSite' not in c or c['sameSite'] not in allowed_same_site:
             c['sameSite'] = 'Lax'
-        # Ensure required defaults
         c.setdefault('domain', '')
         c.setdefault('path', '/')
         c.setdefault('httpOnly', False)
         c.setdefault('secure', False)
-        # Remove fields that Playwright doesn't need
         for field in ['hostOnly', 'session', 'storeId']:
             c.pop(field, None)
 
@@ -30,11 +26,35 @@ def run():
         page = context.new_page()
 
         page.goto("https://app.gumroad.com/products", wait_until="networkidle")
-        page.wait_for_timeout(3000)
+        page.wait_for_timeout(5000)  # let the table fully render
 
-        # Select all products
-        page.click("thead input[type='checkbox']")
-        logging.info("All products selected.")
+        # Save a screenshot BEFORE any click so we can inspect the page
+        page.screenshot(path="before_click.png")
+        logging.info("Screenshot saved as before_click.png. Check artifact.")
+
+        # Try multiple possible selectors for the "select all" checkbox
+        selectors = [
+            "input[type='checkbox']",
+            "thead input",
+            "table input[type='checkbox']",
+            "div[role='row'] input[type='checkbox']",
+            "#products-list thead input[type='checkbox']"
+        ]
+
+        clicked = False
+        for sel in selectors:
+            try:
+                page.click(sel, timeout=5000)
+                logging.info(f"Successfully clicked: {sel}")
+                clicked = True
+                break
+            except:
+                logging.warning(f"Could not click: {sel}")
+
+        if not clicked:
+            logging.error("Could not find any checkbox. Uploading screenshot for inspection.")
+            browser.close()
+            sys.exit(1)
 
         # Click "Edit" dropdown → "Publish all"
         page.click("button:has-text('Edit')")
