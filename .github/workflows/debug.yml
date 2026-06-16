@@ -15,4 +15,5 @@ jobs:
       - name: Debug edit page
         env:
           GUMROAD_COOKIES: ${{ secrets.GUMROAD_COOKIES }}
+          GUMROAD_TOKEN: ${{ secrets.GUMROAD_TOKEN }}       # <-- ADD THIS
         run: python debug_edit_page.py
