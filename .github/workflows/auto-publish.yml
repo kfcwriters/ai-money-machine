@@ -1,9 +1,8 @@
 name: Auto-Publish All Gumroad Drafts
 
 on:
-  # Run 30 minutes after the main product creation workflow (which runs at 08:00 UTC)
   schedule:
-    - cron: '30 8 * * *'
+    - cron: '45 8 * * *'          # 08:45 UTC (45 min after product creation)
   workflow_dispatch:
 
 jobs:
@@ -18,8 +17,7 @@ jobs:
       - run: playwright install chromium
       - name: Publish all drafts
         env:
-          GUMROAD_EMAIL: ${{ secrets.GUMROAD_EMAIL }}
-          GUMROAD_PASSWORD: ${{ secrets.GUMROAD_PASSWORD }}
+          GUMROAD_COOKIES: ${{ secrets.GUMROAD_COOKIES }}
         run: python publish_all.py
       - uses: actions/upload-artifact@v4
         if: always()
