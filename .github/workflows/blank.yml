@@ -1,9 +1,9 @@
-name: AI Money Machine Daily Run
+name: AI Money Machine Daily Run (Ko‑fi)
 
 on:
   schedule:
-    - cron: '0 8 * * *'
-  workflow_dispatch:
+    - cron: '0 8 * * *'          # Runs every day at 08:00 UTC
+  workflow_dispatch:              # Allows manual trigger
 
 jobs:
   run-script:
@@ -11,15 +11,16 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+
       - name: Setup Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+
       - name: Install libraries
         run: pip install requests fpdf2
+
       - name: Run the AI Money Machine
         env:
-          GUMROAD_TOKEN: ${{ secrets.GUMROAD_TOKEN }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+          KOFI_API_KEY: ${{ secrets.KOFI_API_KEY }}
         run: python main.py
