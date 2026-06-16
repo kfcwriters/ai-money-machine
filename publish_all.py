@@ -10,11 +10,10 @@ def run():
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
         context = browser.new_context()
-
-        # Inject the logged‑in session
         context.add_cookies(cookies)
-
         page = context.new_page()
+
+        # Already logged in, go to products
         page.goto("https://app.gumroad.com/products", wait_until="networkidle")
         page.wait_for_timeout(3000)
 
@@ -22,7 +21,7 @@ def run():
         page.click("thead input[type='checkbox']")
         logging.info("All products selected.")
 
-        # Click "Edit" → "Publish all"
+        # Click "Edit" dropdown → "Publish all"
         page.click("button:has-text('Edit')")
         page.click("text=Publish all")
         logging.info("'Publish all' clicked. Waiting...")
@@ -30,7 +29,6 @@ def run():
 
         page.screenshot(path="publish_after.png")
         logging.info("Screenshot saved. All drafts should be published.")
-
         browser.close()
 
 if __name__ == "__main__":
