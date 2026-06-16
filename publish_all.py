@@ -5,7 +5,23 @@ logging.basicConfig(level=logging.INFO, stream=sys.stdout,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 
 def run():
-    cookies = json.loads(os.environ["GUMROAD_COOKIES"])
+    cookies_raw = os.environ["GUMROAD_COOKIES"]
+    cookies = json.loads(cookies_raw)
+
+    # Sanitize cookies for Playwright
+    allowed_same_site = {'Strict', 'Lax', 'None'}
+    for c in cookies:
+        # Set a valid sameSite if missing or invalid
+        if 'sameSite' not in c or c['sameSite'] not in allowed_same_site:
+            c['sameSite'] = 'Lax'
+        # Ensure required defaults
+        c.setdefault('domain', '')
+        c.setdefault('path', '/')
+        c.setdefault('httpOnly', False)
+        c.setdefault('secure', False)
+        # Remove fields that Playwright doesn't need
+        for field in ['hostOnly', 'session', 'storeId']:
+            c.pop(field, None)
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -13,7 +29,6 @@ def run():
         context.add_cookies(cookies)
         page = context.new_page()
 
-        # Already logged in, go to products
         page.goto("https://app.gumroad.com/products", wait_until="networkidle")
         page.wait_for_timeout(3000)
 
