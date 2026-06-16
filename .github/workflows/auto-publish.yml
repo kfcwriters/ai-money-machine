@@ -2,8 +2,8 @@ name: Auto-Publish All Gumroad Drafts
 
 on:
   schedule:
-    - cron: '45 8 * * *'          # 08:45 UTC
-  workflow_dispatch:
+    - cron: '45 8 * * *'          # runs daily at 08:45 UTC
+  workflow_dispatch:              # allows manual trigger
 
 jobs:
   publish:
@@ -18,7 +18,7 @@ jobs:
       - name: Publish all drafts
         env:
           GUMROAD_COOKIES: ${{ secrets.GUMROAD_COOKIES }}
-        run: python publish_all.py
+        run: python publish_all.py           # <-- CORRECT file name
       - uses: actions/upload-artifact@v4
         if: always()
         with:
