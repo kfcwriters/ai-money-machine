@@ -34,17 +34,35 @@ def get_topic():
     return random.choice(TOPICS)
 
 def generate_article(topic):
-    prompt = f"""You are a helpful product reviewer. Write a 500‑word blog post about "{topic}".
-Structure:
-# [Catchy title about {topic}]
-## Introduction (explain why this product category matters)
-## 3–4 practical tips or features to look for (bulleted)
-## One natural product recommendation: "If you're looking for a great option, I recommend checking out [this highly-rated choice on Amazon]({AMAZON_AFFILIATE_LINK}). It's the one I suggest to friends."
-## Encouraging conclusion.
-Write in Markdown. No pushy sales language."""
+    # Force the AI to write about the EXACT topic and product category
+    prompt = f"""You are a product reviewer. Your task is to write a blog post about "{topic}".
+
+RULES:
+- The title must be a catchy, original title about "{topic}" (do NOT repeat the topic word-for-word, rephrase it nicely).
+- Start with an introduction that explains why this product category matters.
+- Then give 3–4 practical features or tips someone should look for when buying such a product.
+- At the end, include this exact sentence: "If you're looking for a great option, check out [this highly-rated pick on Amazon]({AMAZON_AFFILIATE_LINK})."
+- Do NOT mention medicine, hypertension, clinical trials, or any medical topic. This is a consumer product review.
+- Write in Markdown. No links to other sites.
+- Total length: around 500 words."""
+
     raw = llm_generate(prompt)
+    # Extract title from first Markdown heading
     title_match = re.search(r"^#\s*(.+?)$", raw, re.MULTILINE)
-    title = title_match.group(1).strip() if title_match else f"Best {topic}"
+    if title_match:
+        title = title_match.group(1).strip()
+        # Fix duplication like "Best best ..."
+        words = title.split()
+        seen = set()
+        cleaned = []
+        for w in words:
+            low = w.lower()
+            if low not in seen:
+                cleaned.append(w)
+                seen.add(low)
+        title = " ".join(cleaned)
+    else:
+        title = f"Best {topic}"
     body = re.sub(r"^#\s*.+?\n", "", raw, count=1).strip()
     return title, body
 
