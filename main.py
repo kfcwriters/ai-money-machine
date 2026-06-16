@@ -6,11 +6,8 @@ from ai_helper import llm_generate
 logging.basicConfig(level=logging.INFO, stream=sys.stdout,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 
-GUMROAD_TOKEN = os.environ["GUMROAD_TOKEN"]
-TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
+KOFI_API_KEY = os.environ["KOFI_API_KEY"]
 
-# ---------- EVERGREEN TOPICS ----------
 EVERGREEN_TOPICS = [
     "How to build a morning routine that actually sticks",
     "5‑minute daily journaling template for mental clarity",
@@ -68,12 +65,6 @@ Make it sound like a ready‑to‑use $5 download. Use simple language. No links
         title = title_match.group(1).strip()
     else:
         title = f"The Complete Guide to {problem_title}"
-    topic_words = set(problem_title.lower().split())
-    title_words = set(title.lower().split())
-    common = topic_words & title_words
-    if len(common) < max(1, len(topic_words) * 0.3):
-        logging.warning(f"Title mismatch, forcing: {problem_title}")
-        title = f"The Complete Guide to {problem_title}"
     body = re.sub(r"^#\s*.+?\n", "", raw, count=1).strip()
     return title, body
 
@@ -118,99 +109,35 @@ def create_pdf(title, content):
     pdf.output("product.pdf")
     return "product.pdf"
 
-def upload_file_to_gumroad(pdf_path):
-    file_name = "product.pdf"
-    file_size = os.path.getsize(pdf_path)
-    presign_url = "https://api.gumroad.com/v2/files/presign"
-    presign_headers = {"Authorization": f"Bearer {GUMROAD_TOKEN}"}
-    resp = requests.post(presign_url, headers=presign_headers,
-                         json={"filename": file_name, "file_size": file_size}, timeout=30)
-    if resp.status_code != 200:
-        raise Exception(f"Presign failed: {resp.status_code} {resp.text}")
-    data = resp.json()
-    upload_id = data["upload_id"]
-    part = data["parts"][0]
-    presigned_url = part["presigned_url"]
+def publish_to_kofi(title, price, pdf_path):
+    """Create and instantly publish a digital product on Ko‑fi."""
+    headers = {"Authorization": f"Bearer {KOFI_API_KEY}"}
+    data = {
+        "title": title,
+        "price": str(price),          # e.g., "5.00"
+        "type": "digital",
+        "description": title,
+        "published": "true"           # this actually works on Ko‑fi
+    }
     with open(pdf_path, "rb") as f:
-        put_resp = requests.put(presigned_url, data=f, headers={"Content-Type": "application/pdf"}, timeout=60)
-    if put_resp.status_code not in (200, 201, 204):
-        raise Exception(f"S3 upload failed: {put_resp.status_code}")
-    etag = put_resp.headers.get("ETag", "")
-    complete_url = "https://api.gumroad.com/v2/files/complete"
-    complete_body = {
-        "upload_id": upload_id,
-        "key": data["key"],
-        "parts": [{"part_number": part["part_number"], "etag": etag}]
-    }
-    resp = requests.post(complete_url, headers=presign_headers, json=complete_body, timeout=30)
-    if resp.status_code != 200:
-        raise Exception(f"File completion failed: {resp.status_code} {resp.text}")
-    file_url = resp.json().get("file_url") or data["file_url"]
-    logging.info("File uploaded to Gumroad successfully.")
-    return file_url
-
-def send_telegram_notification(product_name, product_id, short_url):
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        return
-    edit_url = f"https://app.gumroad.com/products/{product_id}/edit"
-    message = f"📦 New draft: **{product_name}**\n🔗 [Publish now]({edit_url})\n🌐 {short_url}"
-    try:
-        requests.post(
-            f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage",
-            json={"chat_id": TELEGRAM_CHAT_ID, "text": message, "parse_mode": "Markdown", "disable_web_page_preview": True},
-            timeout=10
+        files = {"file": ("product.pdf", f, "application/pdf")}
+        resp = requests.post(
+            "https://api.ko-fi.com/v1/shop/products",
+            headers=headers,
+            data=data,
+            files=files,
+            timeout=30
         )
-    except:
-        pass
-
-def publish_to_gumroad(ebook_title, pdf_path, problem_title):
-    file_url = upload_file_to_gumroad(pdf_path)
-    headers = {
-        "Authorization": f"Bearer {GUMROAD_TOKEN}",
-        "Content-Type": "application/json"
-    }
-    product_data = {
-        "name": sanitize_text(ebook_title),
-        "description": f"This powerful guide solves: **{sanitize_text(problem_title)}**. Instant download.",
-        "price": 499,
-        "published": True,                # Let's try again with payment details added
-        "files": [{"url": file_url}]
-    }
-    resp = requests.post("https://api.gumroad.com/v2/products",
-                         headers=headers, json=product_data, timeout=30)
-    if resp.status_code == 200 and resp.json().get("success"):
-        product = resp.json()["product"]
-        short_url = product.get("short_url", "no-url")
-        product_id = product["id"]
-        published_status = product.get("published", False)
-        logging.info(f"Product created: {short_url} (published={published_status})")
-
-        # If not published, attempt a PUT update
-        if not published_status:
-            update_url = f"https://api.gumroad.com/v2/products/{product_id}"
-            update_data = {"published": True}
-            update_resp = requests.put(update_url, headers=headers, json=update_data, timeout=30)
-            if update_resp.status_code == 200:
-                new_published = update_resp.json().get("product", {}).get("published", False)
-                if new_published:
-                    logging.info("✅ Product published via PUT update.")
-                else:
-                    logging.warning("PUT update succeeded but published still False.")
-            else:
-                logging.warning(f"PUT update failed ({update_resp.status_code}). Product remains unpublished.")
-
-        # Save link for traffic scripts
-        with open(".latest_product_url", "w") as f:
-            f.write(short_url)
-        # Send Telegram publish reminder (even if published, as confirmation)
-        send_telegram_notification(ebook_title, product_id, short_url)
-        return short_url
-    else:
-        msg = resp.json().get("message", "Unknown error") if resp.headers.get("content-type","").startswith("application/json") else resp.text
-        raise Exception(f"Gumroad product creation failed: {msg}")
+    if resp.status_code in (200, 201):
+        result = resp.json()
+        product_url = result.get("url") or result.get("product", {}).get("url")
+        if product_url:
+            logging.info(f"Ko‑fi product published: {product_url}")
+            return product_url
+    raise Exception(f"Ko‑fi upload failed: {resp.status_code} {resp.text}")
 
 def main():
-    logging.info("=== AI Money Machine Run Starting ===")
+    logging.info("=== AI Money Machine (Ko‑fi) Run Starting ===")
     try:
         problem = get_real_trend()
         logging.info(f"Selected topic: {problem}")
@@ -218,8 +145,10 @@ def main():
         logging.info(f"Product title: {ebook_title}")
         pdf_path = create_pdf(ebook_title, ebook_md)
         logging.info("PDF generated.")
-        gumroad_url = publish_to_gumroad(ebook_title, pdf_path, problem)
-        logging.info(f"Gumroad URL: {gumroad_url}")
+        product_url = publish_to_kofi(ebook_title, 5.00, pdf_path)
+        logging.info(f"Ko‑fi URL: {product_url}")
+        with open(".latest_product_url", "w") as f:
+            f.write(product_url)
         logging.info("=== Run Completed Successfully ===")
     except Exception as e:
         logging.exception("Fatal error")
