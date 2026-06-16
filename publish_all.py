@@ -8,16 +8,11 @@ def run():
     cookies_raw = os.environ["GUMROAD_COOKIES"]
     cookies = json.loads(cookies_raw)
 
-    allowed_same_site = {'Strict', 'Lax', 'None'}
+    # sanitize cookies
     for c in cookies:
-        if 'sameSite' not in c or c['sameSite'] not in allowed_same_site:
-            c['sameSite'] = 'Lax'
+        c.setdefault('sameSite', 'Lax')
         c.setdefault('domain', '')
         c.setdefault('path', '/')
-        c.setdefault('httpOnly', False)
-        c.setdefault('secure', False)
-        for field in ['hostOnly', 'session', 'storeId']:
-            c.pop(field, None)
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -26,44 +21,32 @@ def run():
         page = context.new_page()
 
         page.goto("https://app.gumroad.com/products", wait_until="networkidle")
-        page.wait_for_timeout(5000)  # let the table fully render
+        page.wait_for_timeout(5000)
 
-        # Save a screenshot BEFORE any click so we can inspect the page
-        page.screenshot(path="before_click.png")
-        logging.info("Screenshot saved as before_click.png. Check artifact.")
+        # ===== 1. Use JavaScript to select all checkboxes =====
+        page.evaluate("""() => {
+            // Select all checkboxes in the products table
+            const checkboxes = document.querySelectorAll('input[type="checkbox"]');
+            checkboxes.forEach(cb => { if (!cb.checked) cb.click(); });
+        }""")
+        logging.info("JavaScript: all checkboxes selected.")
 
-        # Try multiple possible selectors for the "select all" checkbox
-        selectors = [
-            "input[type='checkbox']",
-            "thead input",
-            "table input[type='checkbox']",
-            "div[role='row'] input[type='checkbox']",
-            "#products-list thead input[type='checkbox']"
-        ]
+        # ===== 2. Now click the "Edit" button that appears =====
+        # The Edit button shows up when items are selected
+        try:
+            page.click("button:has-text('Edit')", timeout=5000)
+        except:
+            # maybe the button has a different text
+            page.click("text=Edit", timeout=5000)
+        logging.info("Clicked 'Edit'.")
 
-        clicked = False
-        for sel in selectors:
-            try:
-                page.click(sel, timeout=5000)
-                logging.info(f"Successfully clicked: {sel}")
-                clicked = True
-                break
-            except:
-                logging.warning(f"Could not click: {sel}")
-
-        if not clicked:
-            logging.error("Could not find any checkbox. Uploading screenshot for inspection.")
-            browser.close()
-            sys.exit(1)
-
-        # Click "Edit" dropdown → "Publish all"
-        page.click("button:has-text('Edit')")
-        page.click("text=Publish all")
-        logging.info("'Publish all' clicked. Waiting...")
+        # ===== 3. Click "Publish all" =====
+        page.click("text=Publish all", timeout=5000)
+        logging.info("Clicked 'Publish all'. Waiting...")
         page.wait_for_timeout(5000)
 
         page.screenshot(path="publish_after.png")
-        logging.info("Screenshot saved. All drafts should be published.")
+        logging.info("Screenshot saved. All drafts should now be published.")
         browser.close()
 
 if __name__ == "__main__":
