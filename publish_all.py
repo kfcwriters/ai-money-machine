@@ -4,15 +4,27 @@ from playwright.sync_api import sync_playwright
 logging.basicConfig(level=logging.INFO, stream=sys.stdout,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 
+ALLOWED_SAMESITE = {'Strict', 'Lax', 'None'}
+
+def sanitize_cookies(cookies):
+    for c in cookies:
+        # Ensure sameSite is valid
+        if 'sameSite' not in c or c['sameSite'] not in ALLOWED_SAMESITE:
+            c['sameSite'] = 'Lax'
+        # Set required defaults if missing
+        c.setdefault('domain', '.gumroad.com')
+        c.setdefault('path', '/')
+        c.setdefault('httpOnly', False)
+        c.setdefault('secure', True)
+        # Remove fields that Playwright may reject
+        for field in ['hostOnly', 'session', 'storeId']:
+            c.pop(field, None)
+    return cookies
+
 def run():
     cookies_raw = os.environ["GUMROAD_COOKIES"]
     cookies = json.loads(cookies_raw)
-
-    # sanitize cookies
-    for c in cookies:
-        c.setdefault('sameSite', 'Lax')
-        c.setdefault('domain', '')
-        c.setdefault('path', '/')
+    cookies = sanitize_cookies(cookies)
 
     with sync_playwright() as p:
         browser = p.chromium.launch(headless=True)
@@ -23,26 +35,17 @@ def run():
         page.goto("https://app.gumroad.com/products", wait_until="networkidle")
         page.wait_for_timeout(5000)
 
-        # ===== 1. Use JavaScript to select all checkboxes =====
+        # Select all checkboxes via JavaScript
         page.evaluate("""() => {
-            // Select all checkboxes in the products table
             const checkboxes = document.querySelectorAll('input[type="checkbox"]');
             checkboxes.forEach(cb => { if (!cb.checked) cb.click(); });
         }""")
-        logging.info("JavaScript: all checkboxes selected.")
+        logging.info("All checkboxes selected via JavaScript.")
 
-        # ===== 2. Now click the "Edit" button that appears =====
-        # The Edit button shows up when items are selected
-        try:
-            page.click("button:has-text('Edit')", timeout=5000)
-        except:
-            # maybe the button has a different text
-            page.click("text=Edit", timeout=5000)
-        logging.info("Clicked 'Edit'.")
-
-        # ===== 3. Click "Publish all" =====
-        page.click("text=Publish all", timeout=5000)
-        logging.info("Clicked 'Publish all'. Waiting...")
+        # Click "Edit" dropdown → "Publish all"
+        page.click("button:has-text('Edit')")
+        page.click("text=Publish all")
+        logging.info("'Publish all' clicked. Waiting...")
         page.wait_for_timeout(5000)
 
         page.screenshot(path="publish_after.png")
