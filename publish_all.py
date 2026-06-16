@@ -20,7 +20,6 @@ def sanitize_cookies(cookies):
     return cookies
 
 def get_unpublished_product_ids():
-    """Use Gumroad API to fetch draft product IDs."""
     if not GUMROAD_TOKEN:
         return []
     headers = {"Authorization": f"Bearer {GUMROAD_TOKEN}"}
@@ -30,76 +29,19 @@ def get_unpublished_product_ids():
         return [p["id"] for p in products if not p["published"]]
     return []
 
-def publish_single_product(page, product_id):
-    """Open a product edit page, click Content tab, then click Publish."""
-    edit_url = f"https://app.gumroad.com/products/{product_id}/edit"
-    page.goto(edit_url, wait_until="networkidle")
-    page.wait_for_timeout(3000)
-
-    # 1. Click the "Content" tab
-    content_selectors = [
-        "button:has-text('Content')",
-        "a:has-text('Content')",
-        "[role='tab']:has-text('Content')",
-        "text=Content",
-        "[aria-label='Content']",
-        ".tab-content",
-        "#tab-content",
-    ]
-    content_clicked = False
-    for sel in content_selectors:
-        try:
-            page.click(sel, timeout=5000)
-            content_clicked = True
-            logging.info("Clicked Content tab.")
-            break
-        except:
-            continue
-
-    if not content_clicked:
-        logging.warning(f"Could not click Content tab for {product_id}. Trying direct Publish anyway...")
-
-    page.wait_for_timeout(2000)
-
-    # 2. Click the "Publish" button (usually green)
-    publish_selectors = [
-        "button:has-text('Publish')",
-        "a:has-text('Publish')",
-        "[role='button']:has-text('Publish')",
-        "text=Publish",
-        "text=Publish now",
-        "text=Go live",
-        "[aria-label='Publish']",
-        "[data-testid='publish-button']",
-        ".publish-button",
-        "#publish-button",
-    ]
-    for sel in publish_selectors:
-        try:
-            page.click(sel, timeout=5000)
-            logging.info(f"Published product {product_id} via selector: {sel}")
-            return True
-        except:
-            continue
-
-    # JavaScript fallback: click any element containing 'publish'
-    try:
-        page.evaluate("""() => {
-            const elements = document.querySelectorAll('button, a, [role="button"]');
-            for (const el of elements) {
-                if (el.innerText.toLowerCase().includes('publish')) {
-                    el.click();
-                    return true;
-                }
-            }
-            return false;
-        }""")
-        logging.info(f"Published product {product_id} via JavaScript fallback.")
-        return True
-    except:
-        pass
-
-    return False
+def click_text(page, text):
+    """Use JavaScript to click the first element containing exactly the given text."""
+    result = page.evaluate(f"""(text) => {{
+        const elements = document.querySelectorAll('button, a, [role="tab"], span, div');
+        for (const el of elements) {{
+            if (el.innerText.trim() === text) {{
+                el.click();
+                return 'clicked';
+            }}
+        }}
+        return 'not found';
+    }}""", text)
+    return result
 
 def run():
     cookies_raw = os.environ["GUMROAD_COOKIES"]
@@ -112,28 +54,31 @@ def run():
         context.add_cookies(cookies)
         page = context.new_page()
 
-        # --- Try bulk publish first ---
+        # ====== Bulk publish attempt (unchanged) ======
         page.goto("https://app.gumroad.com/products", wait_until="networkidle")
         page.wait_for_timeout(5000)
         page.evaluate("""() => {
             document.querySelectorAll('input[type="checkbox"]').forEach(cb => { if (!cb.checked) cb.click(); });
         }""")
         logging.info("Checkboxes selected. Trying bulk Edit...")
-
         bulk_published = False
         for edit_sel in ["button:has-text('Edit')", "button:has-text('Actions')"]:
             try:
                 page.click(edit_sel, timeout=5000)
                 page.wait_for_timeout(2000)
-                for pub_sel in ["text=Publish all", "text=Publish all products"]:
-                    try:
-                        page.click(pub_sel, timeout=5000)
-                        logging.info("Bulk publish succeeded!")
-                        bulk_published = True
-                        break
-                    except:
-                        continue
-                if bulk_published:
+                res = page.evaluate("""() => {
+                    const elems = document.querySelectorAll('button, a, [role="menuitem"]');
+                    for (const el of elems) {
+                        if (el.innerText.includes('Publish all')) {
+                            el.click();
+                            return 'clicked';
+                        }
+                    }
+                    return 'not found';
+                }""")
+                if res == 'clicked':
+                    bulk_published = True
+                    logging.info("Bulk publish succeeded!")
                     break
             except:
                 continue
@@ -144,8 +89,8 @@ def run():
             browser.close()
             return
 
-        # --- Fallback: publish one by one ---
-        logging.info("Bulk publish not available. Publishing individually...")
+        # ====== Individual publish ======
+        logging.info("Bulk publish unavailable. Publishing individually...")
         product_ids = get_unpublished_product_ids()
         if not product_ids:
             # Scrape product links from the page
@@ -164,11 +109,31 @@ def run():
         logging.info(f"Found {len(product_ids)} products. Publishing each...")
         success = 0
         for pid in product_ids:
-            if publish_single_product(page, pid):
+            edit_url = f"https://app.gumroad.com/products/{pid}/edit"
+            page.goto(edit_url, wait_until="networkidle")
+            page.wait_for_timeout(6000)   # extra time for dynamic content
+
+            # 1. Click "Content" tab
+            content_result = click_text(page, "Content")
+            logging.info(f"Content click: {content_result}")
+            page.wait_for_timeout(3000)
+
+            # 2. Click "Publish" button (may have appeared after clicking Content)
+            publish_result = click_text(page, "Publish")
+            logging.info(f"Publish click: {publish_result}")
+            if publish_result == 'clicked':
                 success += 1
                 time.sleep(2)
             else:
-                logging.warning(f"Failed to publish {pid}")
+                # Try "Publish now" or other variations
+                for alt_text in ["Publish now", "Go live"]:
+                    if click_text(page, alt_text) == 'clicked':
+                        success += 1
+                        logging.info(f"Clicked '{alt_text}' for {pid}")
+                        time.sleep(2)
+                        break
+                else:
+                    logging.warning(f"Could not publish {pid}")
 
         logging.info(f"Publishing complete. Success: {success}/{len(product_ids)}")
         browser.close()
