@@ -1,10 +1,11 @@
-import os, sys, json, logging
+import os, sys, json, logging, requests
 from playwright.sync_api import sync_playwright
 
 logging.basicConfig(level=logging.INFO, stream=sys.stdout,
                     format='%(asctime)s - %(levelname)s - %(message)s')
 
 ALLOWED_SAMESITE = {'Strict', 'Lax', 'None'}
+GUMROAD_TOKEN = os.environ["GUMROAD_TOKEN"]   # required
 
 def sanitize_cookies(cookies):
     for c in cookies:
@@ -19,6 +20,21 @@ def sanitize_cookies(cookies):
     return cookies
 
 def run():
+    # 1. Get the first unpublished product ID via API
+    headers = {"Authorization": f"Bearer {GUMROAD_TOKEN}"}
+    resp = requests.get("https://api.gumroad.com/v2/products", headers=headers)
+    if resp.status_code != 200:
+        logging.error("Failed to fetch products via API.")
+        return
+    products = resp.json()["products"]
+    draft = next((p for p in products if not p["published"]), None)
+    if not draft:
+        logging.info("No unpublished products found. All are already published!")
+        return
+    product_id = draft["id"]
+    logging.info(f"Unpublished product: {draft['name']} (id={product_id})")
+
+    # 2. Load cookies and open the edit page
     cookies_raw = os.environ["GUMROAD_COOKIES"]
     cookies = json.loads(cookies_raw)
     cookies = sanitize_cookies(cookies)
@@ -29,34 +45,11 @@ def run():
         context.add_cookies(cookies)
         page = context.new_page()
 
-        # Go to the products page and get one unpublished product ID
-        page.goto("https://app.gumroad.com/products", wait_until="networkidle")
-        page.wait_for_timeout(5000)
-
-        # Get first product link
-        product_id = page.evaluate("""() => {
-            const links = document.querySelectorAll('a[href*="/products/"]');
-            for (const link of links) {
-                const href = link.getAttribute('href');
-                const match = href.match(/\\/products\\/([a-zA-Z0-9_-]+)/);
-                if (match) return match[1];
-            }
-            return null;
-        }""")
-
-        if not product_id:
-            logging.error("Could not find any product ID on the products page.")
-            browser.close()
-            return
-
-        logging.info(f"Using product ID: {product_id}")
-
-        # Open the edit page
         edit_url = f"https://app.gumroad.com/products/{product_id}/edit"
         page.goto(edit_url, wait_until="networkidle")
         page.wait_for_timeout(5000)
 
-        # Log ALL text from buttons and clickable elements
+        # Log all clickable elements
         all_clickable = page.evaluate("""() => {
             const elems = document.querySelectorAll('button, a, [role="button"], [role="menuitem"], input[type="submit"], input[type="button"]');
             const result = [];
@@ -70,15 +63,15 @@ def run():
             });
             return result;
         }""")
-
         logging.info("=== All clickable elements on edit page ===")
         for i, el in enumerate(all_clickable):
             logging.info(f"{i+1}. <{el['tag']}> text='{el['text']}' id='{el['id']}' class='{el['cls']}' type='{el['type']}'")
 
-        # Also log the full page text (first 2000 chars) to see context
-        full_text = page.inner_text('body')
-        logging.info("=== Page body text (first 2000 chars) ===")
-        logging.info(full_text[:2000])
+        # Also log the page title and main heading
+        title = page.title()
+        h1 = page.inner_text('h1').strip() if page.locator('h1').count() > 0 else ''
+        logging.info(f"Page title: {title}")
+        logging.info(f"Main heading: {h1}")
 
         browser.close()
 
