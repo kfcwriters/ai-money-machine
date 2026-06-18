@@ -19,10 +19,15 @@ def post_to_buffer():
         logging.warning("Buffer token missing.")
         return
 
-    # ---------- 1. Get profiles ----------
+    headers = {
+        "Authorization": f"Bearer {BUFFER_TOKEN}",
+        "Content-Type": "application/json",
+    }
+
+    # 1. Get profiles – using the NEW API
     r = requests.get(
-        "https://api.bufferapp.com/1/profiles.json",
-        params={"access_token": BUFFER_TOKEN}
+        "https://api.buffer.com/1/profiles.json",
+        headers=headers
     )
     if r.status_code != 200:
         logging.error(f"Buffer profiles error: {r.text[:200]}")
@@ -40,20 +45,21 @@ def post_to_buffer():
         else:
             text = f"{title}\n\n{body[:300]}...\n👉 {LINK}"
 
-        data = {
-            "access_token": BUFFER_TOKEN,
-            "profile_ids[]": pid,
+        update_data = {
+            "profile_ids": [pid],
             "text": text,
         }
-
-        # Pinterest needs an image (use placeholder)
+        # Pinterest needs an image
         if service == "pinterest":
-            data["media[link]"] = "https://via.placeholder.com/1000x1500.png/0d47a1/ffffff?text=Best+Deals"
+            update_data["media"] = [{
+                "link": "https://via.placeholder.com/1000x1500.png/0d47a1/ffffff?text=Best+Deals"
+            }]
 
-        # ---------- 2. Create the update ----------
+        # 2. Create the update – using JSON body
         post_r = requests.post(
-            "https://api.bufferapp.com/1/updates/create.json",
-            data=data
+            "https://api.buffer.com/1/updates/create.json",
+            json=update_data,          # <-- THIS sends proper JSON
+            headers=headers
         )
         if post_r.status_code == 200:
             logging.info(f"Buffer: queued for {service}")
