@@ -1,0 +1,13 @@
+name: Send Test Webhook
+
+on: workflow_dispatch
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send test payload
+        run: |
+          curl -X POST "${{ secrets.ZAPIER_WEBHOOK_URL }}" \
+            -H "Content-Type: application/json" \
+            -d '{"title":"Test Title","description":"Test description for Zapier."}'
