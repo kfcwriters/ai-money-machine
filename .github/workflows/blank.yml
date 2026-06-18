@@ -2,8 +2,8 @@ name: AI Money Machine Daily Run
 
 on:
   schedule:
-    - cron: '0 8 * * *'
-  workflow_dispatch:
+    - cron: '0 8 * * *'          # Every day at 08:00 UTC
+  workflow_dispatch:              # Manual trigger from Actions tab
 
 jobs:
   run:
@@ -13,7 +13,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: pip install requests fpdf2 tweepy praw
+
+      - name: Install dependencies
+        run: pip install requests fpdf2 praw
 
       - name: Generate article
         env:
@@ -33,18 +35,11 @@ jobs:
           AMAZON_AFFILIATE_LINK: ${{ secrets.AMAZON_AFFILIATE_LINK }}
         run: python telegram_pr.py
 
-      - name: Post to Facebook, LinkedIn, Twitter, Reddit
+      - name: Post to Buffer (FB, TW, PIN), LinkedIn, Reddit
         env:
           AMAZON_AFFILIATE_LINK: ${{ secrets.AMAZON_AFFILIATE_LINK }}
-          FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
-          FB_PAGE_TOKEN: ${{ secrets.FB_PAGE_TOKEN }}
-          LINKEDIN_CLIENT_ID: ${{ secrets.LINKEDIN_CLIENT_ID }}
-          LINKEDIN_CLIENT_SECRET: ${{ secrets.LINKEDIN_CLIENT_SECRET }}
+          BUFFER_ACCESS_TOKEN: ${{ secrets.BUFFER_ACCESS_TOKEN }}
           LINKEDIN_ACCESS_TOKEN: ${{ secrets.LINKEDIN_ACCESS_TOKEN }}
-          TWITTER_API_KEY: ${{ secrets.TWITTER_API_KEY }}
-          TWITTER_API_KEY_SECRET: ${{ secrets.TWITTER_API_KEY_SECRET }}
-          TWITTER_ACCESS_TOKEN: ${{ secrets.TWITTER_ACCESS_TOKEN }}
-          TWITTER_ACCESS_TOKEN_SECRET: ${{ secrets.TWITTER_ACCESS_TOKEN_SECRET }}
           REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}
           REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
           REDDIT_USERNAME: ${{ secrets.REDDIT_USERNAME }}
