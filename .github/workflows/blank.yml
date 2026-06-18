@@ -1,4 +1,4 @@
-name: AI Money Machine Daily Run (Amazon)
+name: AI Money Machine Daily Run
 
 on:
   schedule:
@@ -6,39 +6,47 @@ on:
   workflow_dispatch:
 
 jobs:
-  run-script:
+  run:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: pip install requests fpdf2 pillow
-      - name: Generate affiliate article
+      - run: pip install requests fpdf2 tweepy praw
+
+      - name: Generate article
         env:
           AMAZON_AFFILIATE_LINK: ${{ secrets.AMAZON_AFFILIATE_LINK }}
         run: python main.py
-      - name: Publish to Dev.to
+
+      - name: Post to Dev.to
         env:
           DEVTO_API_KEY: ${{ secrets.DEVTO_API_KEY }}
           AMAZON_AFFILIATE_LINK: ${{ secrets.AMAZON_AFFILIATE_LINK }}
         run: python medical_seo_article.py
-      - name: Post to Facebook
-        env:
-          FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
-          FB_PAGE_TOKEN: ${{ secrets.FB_PAGE_TOKEN }}
-          AMAZON_AFFILIATE_LINK: ${{ secrets.AMAZON_AFFILIATE_LINK }}
-        run: python fb_daily_post.py
+
       - name: Send to Telegram
         env:
           TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHANNEL_ID: ${{ secrets.TELEGRAM_CHANNEL_ID }}
           AMAZON_AFFILIATE_LINK: ${{ secrets.AMAZON_AFFILIATE_LINK }}
         run: python telegram_pr.py
-      # Uncomment the next step if you have Pinterest credentials set up
-      # - name: Post to Pinterest
-      #   env:
-      #     PINTEREST_ACCESS_TOKEN: ${{ secrets.PINTEREST_ACCESS_TOKEN }}
-      #     PINTEREST_APP_ID: ${{ secrets.PINTEREST_APP_ID }}
-      #     AMAZON_AFFILIATE_LINK: ${{ secrets.AMAZON_AFFILIATE_LINK }}
-      #   run: python medical_pin.py
+
+      - name: Post to Facebook, LinkedIn, Twitter, Reddit
+        env:
+          AMAZON_AFFILIATE_LINK: ${{ secrets.AMAZON_AFFILIATE_LINK }}
+          FB_PAGE_ID: ${{ secrets.FB_PAGE_ID }}
+          FB_PAGE_TOKEN: ${{ secrets.FB_PAGE_TOKEN }}
+          LINKEDIN_CLIENT_ID: ${{ secrets.LINKEDIN_CLIENT_ID }}
+          LINKEDIN_CLIENT_SECRET: ${{ secrets.LINKEDIN_CLIENT_SECRET }}
+          LINKEDIN_ACCESS_TOKEN: ${{ secrets.LINKEDIN_ACCESS_TOKEN }}
+          TWITTER_API_KEY: ${{ secrets.TWITTER_API_KEY }}
+          TWITTER_API_KEY_SECRET: ${{ secrets.TWITTER_API_KEY_SECRET }}
+          TWITTER_ACCESS_TOKEN: ${{ secrets.TWITTER_ACCESS_TOKEN }}
+          TWITTER_ACCESS_TOKEN_SECRET: ${{ secrets.TWITTER_ACCESS_TOKEN_SECRET }}
+          REDDIT_CLIENT_ID: ${{ secrets.REDDIT_CLIENT_ID }}
+          REDDIT_CLIENT_SECRET: ${{ secrets.REDDIT_CLIENT_SECRET }}
+          REDDIT_USERNAME: ${{ secrets.REDDIT_USERNAME }}
+          REDDIT_PASSWORD: ${{ secrets.REDDIT_PASSWORD }}
+        run: python post_everywhere.py
