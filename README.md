@@ -25,21 +25,37 @@ Your ongoing job: add new rows to `products.csv` every so often. That's it.
 
 ### 2. Create a Buffer account and connect your channels
 - Go to buffer.com, sign up free.
-- Connect Instagram, Facebook, or whichever channels you have (free plan
-  supports 3 channels).
+- Connect Instagram, Facebook, Pinterest, or whichever channels you have
+  (free plan supports 3 channels).
 
-### 3. Get your Buffer Access Token
-- Go to buffer.com/developers/apps, create an app, generate a personal
-  access token.
-- Go to your Buffer dashboard, find each connected channel's Profile ID
-  (visible in the URL or via the API's `/profiles.json` endpoint).
+### 3. Create your Buffer Access Token
+- Go to publish.buffer.com/settings/api -> Personal Keys tab.
+- Click "New Key", name it anything (e.g. "AutoPoster").
+- Copy the token shown - this is your `BUFFER_ACCESS_TOKEN`.
 
-### 4. Add secrets to your GitHub repo (never put these in the code itself)
+### 4. Get your Channel IDs
+Buffer's API is GraphQL-based. To find each connected channel's ID:
+- Go to the API Explorer linked from your API settings page (or
+  developers.buffer.com), paste in your access token, and run:
+  ```
+  query {
+    account {
+      organizations {
+        channels { id service }
+      }
+    }
+  }
+  ```
+- This returns one `id` per connected channel (Facebook, Instagram,
+  Pinterest) alongside which service it is. Copy all the IDs you want
+  to post to.
+
+### 5. Add secrets to your GitHub repo (never put these in the code itself)
 In your repo: Settings -> Secrets and variables -> Actions -> New repository secret
 - `BUFFER_ACCESS_TOKEN` = the token from step 3
-- `BUFFER_PROFILE_IDS` = comma-separated profile IDs, e.g. `abc123,def456`
+- `BUFFER_CHANNEL_IDS` = comma-separated channel IDs, e.g. `abc123,def456,ghi789`
 
-### 5. Test it manually
+### 6. Test it manually
 - Go to the "Actions" tab in your repo -> "Daily Amazon Affiliate Post" ->
   "Run workflow" button. This runs it immediately so you can check it works
   before waiting for the schedule.
