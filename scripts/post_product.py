@@ -35,7 +35,6 @@ mutation CreateScheduledPost(
     schedulingType: automatic,
     mode: customScheduled,
     dueAt: $dueAt,
-    type: post,
     assets: [
       { image: { url: $imageUrl } }
     ]
@@ -105,7 +104,10 @@ def post_to_buffer(caption, link, image_url, channel_id, access_token):
         },
         timeout=20,
     )
-    response.raise_for_status()
+    if not response.ok:
+        raise RuntimeError(
+            f"HTTP {response.status_code} from Buffer: {response.text[:1000]}"
+        )
     body = response.json()
     if "errors" in body:
         raise RuntimeError(f"GraphQL errors: {body['errors']}")
