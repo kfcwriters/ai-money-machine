@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
 """
 Daily auto-poster: reads products.csv, picks the next unposted product,
-generates a caption, and schedules it to Buffer's connected channels.
+generates a caption, and schedules it via Buffer's GraphQL API.
 
 Required GitHub repo secrets (Settings -> Secrets and variables -> Actions):
   BUFFER_ACCESS_TOKEN   - your Buffer API personal access token
-  BUFFER_PROFILE_IDS    - comma-separated Buffer profile IDs to post to
+  BUFFER_CHANNEL_IDS    - comma-separated Buffer channel IDs to post to
 
 Both are kept out of the code on purpose. Never put real keys directly
 into this file or commit them - GitHub repos can be public.
@@ -20,7 +20,26 @@ from datetime import datetime, timedelta, timezone
 import requests
 
 CSV_PATH = "products.csv"
-BUFFER_API_URL = "https://api.bufferapp.com/1/updates/create.json"
+BUFFER_API_URL = "https://api.buffer.com"
+
+CREATE_POST_MUTATION = """
+mutation CreateScheduledPost($text: String!, $channelId: ChannelId!, $dueAt: DateTime!) {
+  createPost(input: {
+    text: $text,
+    channelId: $channelId,
+    schedulingType: automatic,
+    mode: customScheduled,
+    dueAt: $dueAt
+  }) {
+    ... on PostActionSuccess {
+      post { id text dueAt }
+    }
+    ... on MutationError {
+      message
+    }
+  }
+}
+"""
 
 HOOK_TEMPLATES = [
     "Didn't expect to actually use this daily, but here we are.",
@@ -60,30 +79,39 @@ def build_caption(product):
     )
 
 
-def post_to_buffer(caption, link, access_token, profile_ids):
+def post_to_buffer(caption, link, channel_id, access_token):
     scheduled_time = datetime.now(timezone.utc) + timedelta(hours=1)
-    payload = {
+    variables = {
         "text": f"{caption}\n{link}",
-        "profile_ids[]": profile_ids,
-        "scheduled_at": scheduled_time.isoformat(),
+        "channelId": channel_id,
+        "dueAt": scheduled_time.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
     }
     response = requests.post(
         BUFFER_API_URL,
-        data=payload,
-        headers={"Authorization": f"Bearer {access_token}"},
+        json={"query": CREATE_POST_MUTATION, "variables": variables},
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+        },
         timeout=20,
     )
     response.raise_for_status()
-    return response.json()
+    body = response.json()
+    if "errors" in body:
+        raise RuntimeError(f"GraphQL errors: {body['errors']}")
+    result = body.get("data", {}).get("createPost", {})
+    if "message" in result:  # MutationError shape
+        raise RuntimeError(f"Buffer rejected post: {result['message']}")
+    return body
 
 
 def main():
     access_token = os.environ.get("BUFFER_ACCESS_TOKEN")
-    profile_ids_raw = os.environ.get("BUFFER_PROFILE_IDS", "")
-    profile_ids = [p.strip() for p in profile_ids_raw.split(",") if p.strip()]
+    channel_ids_raw = os.environ.get("BUFFER_CHANNEL_IDS", "")
+    channel_ids = [c.strip() for c in channel_ids_raw.split(",") if c.strip()]
 
-    if not access_token or not profile_ids:
-        print("Missing BUFFER_ACCESS_TOKEN or BUFFER_PROFILE_IDS secrets.")
+    if not access_token or not channel_ids:
+        print("Missing BUFFER_ACCESS_TOKEN or BUFFER_CHANNEL_IDS secrets.")
         sys.exit(1)
 
     rows = load_products(CSV_PATH)
@@ -101,11 +129,17 @@ def main():
     caption = build_caption(next_row)
     print("Generated caption:\n", caption)
 
-    try:
-        result = post_to_buffer(caption, next_row["link"], access_token, profile_ids)
-        print("Buffer response:", result)
-    except requests.HTTPError as e:
-        print("Buffer API call failed:", e, e.response.text if e.response else "")
+    any_failure = False
+    for channel_id in channel_ids:
+        try:
+            result = post_to_buffer(caption, next_row["link"], channel_id, access_token)
+            print(f"Posted to channel {channel_id}:", result)
+        except (requests.HTTPError, RuntimeError) as e:
+            print(f"Failed to post to channel {channel_id}:", e)
+            any_failure = True
+
+    if any_failure:
+        print("At least one channel failed - not marking as posted, will retry tomorrow.")
         sys.exit(1)
 
     next_row["posted"] = "yes"
