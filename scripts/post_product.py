@@ -23,13 +23,22 @@ CSV_PATH = "products.csv"
 BUFFER_API_URL = "https://api.buffer.com"
 
 CREATE_POST_MUTATION = """
-mutation CreateScheduledPost($text: String!, $channelId: ChannelId!, $dueAt: DateTime!) {
+mutation CreateScheduledPost(
+  $text: String!,
+  $channelId: ChannelId!,
+  $dueAt: DateTime!,
+  $imageUrl: String!
+) {
   createPost(input: {
     text: $text,
     channelId: $channelId,
     schedulingType: automatic,
     mode: customScheduled,
-    dueAt: $dueAt
+    dueAt: $dueAt,
+    type: post,
+    assets: [
+      { image: { url: $imageUrl } }
+    ]
   }) {
     ... on PostActionSuccess {
       post { id text dueAt }
@@ -79,12 +88,13 @@ def build_caption(product):
     )
 
 
-def post_to_buffer(caption, link, channel_id, access_token):
+def post_to_buffer(caption, link, image_url, channel_id, access_token):
     scheduled_time = datetime.now(timezone.utc) + timedelta(hours=1)
     variables = {
         "text": f"{caption}\n{link}",
         "channelId": channel_id,
         "dueAt": scheduled_time.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
+        "imageUrl": image_url,
     }
     response = requests.post(
         BUFFER_API_URL,
@@ -129,10 +139,15 @@ def main():
     caption = build_caption(next_row)
     print("Generated caption:\n", caption)
 
+    image_url = next_row.get("image_url", "").strip()
+    if not image_url:
+        print(f"No image_url set for '{next_row['name']}' - skipping, add one to products.csv.")
+        sys.exit(1)
+
     any_failure = False
     for channel_id in channel_ids:
         try:
-            result = post_to_buffer(caption, next_row["link"], channel_id, access_token)
+            result = post_to_buffer(caption, next_row["link"], image_url, channel_id, access_token)
             print(f"Posted to channel {channel_id}:", result)
         except (requests.HTTPError, RuntimeError) as e:
             print(f"Failed to post to channel {channel_id}:", e)
