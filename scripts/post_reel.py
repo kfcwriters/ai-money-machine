@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
 """
 Daily Reel poster: reads reels.csv, picks the next unposted product,
-generates a silent slideshow-style vertical video with ffmpeg, hosts it
-via this repo's raw.githubusercontent.com URL, and posts it as a Reel
-to Instagram and Facebook via Buffer's GraphQL API.
+generates a silent slideshow-style vertical video with ffmpeg, uploads
+it to Cloudinary for a public URL, and posts it as a Reel to Instagram
+and Facebook via Buffer's GraphQL API.
 
 Kept as a separate script from post_product.py on purpose - if this one
 breaks, the working image-post system keeps running untouched.
 
-Required GitHub repo secrets (same ones used by post_product.py):
+Required GitHub repo secrets:
   BUFFER_ACCESS_TOKEN
-  BUFFER_CHANNEL_IDS   - only facebook/instagram channels make sense here;
-                         Pinterest does not support video Reels the same way.
+  BUFFER_CHANNEL_IDS       - same ones used by post_product.py
+  CLOUDINARY_CLOUD_NAME
+  CLOUDINARY_API_KEY
+  CLOUDINARY_API_SECRET
 
 Required CSV columns in reels.csv:
   name, price, link, angle, image_url, posted
@@ -25,6 +27,9 @@ from datetime import datetime, timedelta, timezone
 
 import requests
 
+import cloudinary
+import cloudinary.uploader
+
 from post_product import (
     BUFFER_API_URL,
     NETWORK_METADATA,
@@ -34,7 +39,6 @@ from post_product import (
 )
 
 REELS_CSV_PATH = "reels.csv"
-REELS_OUTPUT_DIR = "reels"
 
 CREATE_VIDEO_POST_MUTATION = """
 mutation CreateScheduledVideoPost(
@@ -113,23 +117,24 @@ def generate_reel(product_image_path, product_name, price, angle, output_path):
         raise RuntimeError(f"ffmpeg failed: {result.stderr[-1500:]}")
 
 
-def commit_and_get_video_url(local_path, repo_relative_path):
-    os.makedirs(os.path.dirname(repo_relative_path) or ".", exist_ok=True)
-    subprocess.run(["cp", local_path, repo_relative_path], check=True)
-    subprocess.run(["git", "add", repo_relative_path], check=True)
-    commit_result = subprocess.run(
-        ["git", "commit", "-m", f"Add generated reel: {repo_relative_path}"],
-        capture_output=True, text=True,
-    )
-    if commit_result.returncode != 0 and "nothing to commit" not in commit_result.stdout:
-        raise RuntimeError(f"git commit failed: {commit_result.stderr}")
-    subprocess.run(["git", "push"], check=True)
+def configure_cloudinary():
+    cloud_name = os.environ.get("CLOUDINARY_CLOUD_NAME")
+    api_key = os.environ.get("CLOUDINARY_API_KEY")
+    api_secret = os.environ.get("CLOUDINARY_API_SECRET")
+    if not all([cloud_name, api_key, api_secret]):
+        raise RuntimeError(
+            "Missing CLOUDINARY_CLOUD_NAME, CLOUDINARY_API_KEY, or CLOUDINARY_API_SECRET secrets."
+        )
+    cloudinary.config(cloud_name=cloud_name, api_key=api_key, api_secret=api_secret)
 
-    repo = os.environ.get("GITHUB_REPOSITORY", "")
-    branch = os.environ.get("GITHUB_REF_NAME", "main")
-    if not repo:
-        raise RuntimeError("GITHUB_REPOSITORY env var not set - can't build raw URL.")
-    return f"https://raw.githubusercontent.com/{repo}/{branch}/{repo_relative_path}"
+
+def upload_video_and_get_url(local_path):
+    """Uploads the generated reel to Cloudinary and returns its public URL."""
+    result = cloudinary.uploader.upload(local_path, resource_type="video")
+    url = result.get("secure_url")
+    if not url:
+        raise RuntimeError(f"Cloudinary upload did not return a URL: {result}")
+    return url
 
 
 def post_video_to_buffer(caption, link, video_url, channel_id, service, access_token):
@@ -205,6 +210,8 @@ def main():
     local_video_path = "tmp_reel_build/reel.mp4"
 
     try:
+        configure_cloudinary()
+
         print("Downloading product image...")
         download_image(image_url, local_image_path)
 
@@ -217,12 +224,8 @@ def main():
             local_video_path,
         )
 
-        safe_name = "".join(c if c.isalnum() else "_" for c in next_row["name"])[:40]
-        timestamp = datetime.now(timezone.utc).strftime("%Y%m%d%H%M%S")
-        repo_relative_path = f"{REELS_OUTPUT_DIR}/{timestamp}_{safe_name}.mp4"
-
-        print("Committing video to repo and building public URL...")
-        video_url = commit_and_get_video_url(local_video_path, repo_relative_path)
+        print("Uploading video to Cloudinary...")
+        video_url = upload_video_and_get_url(local_video_path)
         print("Video URL:", video_url)
 
     except (requests.RequestException, RuntimeError, subprocess.CalledProcessError) as e:
