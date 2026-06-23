@@ -55,7 +55,7 @@ mutation CreateScheduledPost(
 # when assets are attached. Pinterest and other networks don't need this.
 NETWORK_METADATA = {
     "facebook": {"facebook": {"type": "post"}},
-    "instagram": {"instagram": {"type": "post"}},
+    "instagram": {"instagram": {"type": "post", "shouldShareToFeed": True}},
 }
 
 HOOK_TEMPLATES = [
