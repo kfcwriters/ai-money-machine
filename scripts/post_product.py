@@ -27,7 +27,8 @@ mutation CreateScheduledPost(
   $text: String!,
   $channelId: ChannelId!,
   $dueAt: DateTime!,
-  $imageUrl: String!
+  $imageUrl: String!,
+  $metadata: PostInputMetaData
 ) {
   createPost(input: {
     text: $text,
@@ -37,7 +38,8 @@ mutation CreateScheduledPost(
     dueAt: $dueAt,
     assets: [
       { image: { url: $imageUrl } }
-    ]
+    ],
+    metadata: $metadata
   }) {
     ... on PostActionSuccess {
       post { id text dueAt }
@@ -48,6 +50,13 @@ mutation CreateScheduledPost(
   }
 }
 """
+
+# Facebook and Instagram require an explicit post "type" (post/story/reel)
+# when assets are attached. Pinterest and other networks don't need this.
+NETWORK_METADATA = {
+    "facebook": {"facebook": {"type": "post"}},
+    "instagram": {"instagram": {"type": "post"}},
+}
 
 HOOK_TEMPLATES = [
     "Didn't expect to actually use this daily, but here we are.",
@@ -87,13 +96,55 @@ def build_caption(product):
     )
 
 
-def post_to_buffer(caption, link, image_url, channel_id, access_token):
+GET_CHANNELS_QUERY = """
+query GetChannels {
+  account {
+    organizations {
+      channels {
+        id
+        service
+      }
+    }
+  }
+}
+"""
+
+
+def fetch_channel_services(access_token):
+    """Returns a dict mapping channel_id -> service name (e.g. 'facebook')."""
+    response = requests.post(
+        BUFFER_API_URL,
+        json={"query": GET_CHANNELS_QUERY},
+        headers={
+            "Authorization": f"Bearer {access_token}",
+            "Content-Type": "application/json",
+        },
+        timeout=20,
+    )
+    if not response.ok:
+        raise RuntimeError(
+            f"HTTP {response.status_code} fetching channels: {response.text[:1000]}"
+        )
+    body = response.json()
+    if "errors" in body:
+        raise RuntimeError(f"GraphQL errors fetching channels: {body['errors']}")
+
+    mapping = {}
+    orgs = body.get("data", {}).get("account", {}).get("organizations", [])
+    for org in orgs:
+        for channel in org.get("channels", []):
+            mapping[channel["id"]] = channel["service"]
+    return mapping
+
+
+def post_to_buffer(caption, link, image_url, channel_id, service, access_token):
     scheduled_time = datetime.now(timezone.utc) + timedelta(hours=1)
     variables = {
         "text": f"{caption}\n{link}",
         "channelId": channel_id,
         "dueAt": scheduled_time.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
         "imageUrl": image_url,
+        "metadata": NETWORK_METADATA.get(service),  # None for networks that don't need it
     }
     response = requests.post(
         BUFFER_API_URL,
@@ -146,13 +197,24 @@ def main():
         print(f"No image_url set for '{next_row['name']}' - skipping, add one to products.csv.")
         sys.exit(1)
 
+    try:
+        channel_services = fetch_channel_services(access_token)
+    except RuntimeError as e:
+        print("Could not fetch channel info from Buffer:", e)
+        sys.exit(1)
+
     any_failure = False
     for channel_id in channel_ids:
+        service = channel_services.get(channel_id, "")
+        if not service:
+            print(f"Warning: channel {channel_id} not found in your Buffer account - skipping.")
+            any_failure = True
+            continue
         try:
-            result = post_to_buffer(caption, next_row["link"], image_url, channel_id, access_token)
-            print(f"Posted to channel {channel_id}:", result)
+            result = post_to_buffer(caption, next_row["link"], image_url, channel_id, service, access_token)
+            print(f"Posted to {service} channel {channel_id}:", result)
         except (requests.HTTPError, RuntimeError) as e:
-            print(f"Failed to post to channel {channel_id}:", e)
+            print(f"Failed to post to {service} channel {channel_id}:", e)
             any_failure = True
 
     if any_failure:
