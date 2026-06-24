@@ -111,7 +111,7 @@ query GetOrganizations {
 """
 
 GET_CHANNELS_QUERY = """
-query GetChannels($organizationId: String!) {
+query GetChannels($organizationId: OrganizationId!) {
   channels(input: { organizationId: $organizationId }) {
     id
     service
