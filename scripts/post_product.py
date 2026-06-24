@@ -56,6 +56,12 @@ NETWORK_METADATA = {
     "instagram": {"instagram": {"type": "post", "shouldShareToFeed": True}},
 }
 
+# Pinterest is intentionally excluded from this automation for now due to
+# an unresolved Buffer<->Pinterest posting issue (generic "unknown error"
+# on every attempt, even with correct links and a freshly reconnected
+# channel). Revisit later as a separate, dedicated piece of work.
+EXCLUDED_SERVICES = {"pinterest"}
+
 HOOK_TEMPLATES = [
     "Didn't expect to actually use this daily, but here we are.",
     "Saw this mentioned a few times and finally tried it. Worth it.",
@@ -92,21 +98,6 @@ def build_caption(product):
         f"Link in bio/comments.\n"
         f"{tags}"
     )
-
-
-def build_pinterest_caption(product):
-    """
-    Pinterest caps posts at 500 characters and performs better with
-    short, keyword-style descriptions rather than hashtag-heavy captions.
-    Kept deliberately compact and link-light.
-    """
-    name = product["name"]
-    if len(name) > 80:
-        name = name[:77] + "..."
-    angle = product["angle"]
-    if len(angle) > 100:
-        angle = angle[:97] + "..."
-    return f"{name} - Rs {product['price']}. {angle}."
 
 
 GET_CHANNELS_QUERY = """
@@ -224,20 +215,12 @@ def main():
             any_failure = True
             continue
 
-        # Pinterest blocks shortened links (amzn.to / link.amazon) as spam.
-        # Use the full, un-shortened link for Pinterest specifically; other
-        # networks keep using the short link as usual.
-        if service == "pinterest" and next_row.get("link_full", "").strip():
-            link_to_use = next_row["link_full"].strip()
-        else:
-            link_to_use = next_row["link"]
-
-        # Pinterest caps posts at 500 characters and favors short, plain
-        # descriptions - use a dedicated shorter caption for it.
-        caption_to_use = build_pinterest_caption(next_row) if service == "pinterest" else caption
+        if service in EXCLUDED_SERVICES:
+            print(f"Skipping {service} channel {channel_id} - excluded for now (see EXCLUDED_SERVICES note).")
+            continue
 
         try:
-            result = post_to_buffer(caption_to_use, link_to_use, image_url, channel_id, service, access_token)
+            result = post_to_buffer(caption, next_row["link"], image_url, channel_id, service, access_token)
             print(f"Posted to {service} channel {channel_id}:", result)
         except (requests.HTTPError, RuntimeError) as e:
             print(f"Failed to post to {service} channel {channel_id}:", e)
