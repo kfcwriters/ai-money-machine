@@ -100,15 +100,21 @@ def build_caption(product):
     )
 
 
-GET_CHANNELS_QUERY = """
-query GetChannels {
+GET_ORGANIZATIONS_QUERY = """
+query GetOrganizations {
   account {
     organizations {
-      channels {
-        id
-        service
-      }
+      id
     }
+  }
+}
+"""
+
+GET_CHANNELS_QUERY = """
+query GetChannels($organizationId: String!) {
+  channels(input: { organizationId: $organizationId }) {
+    id
+    service
   }
 }
 """
@@ -116,28 +122,48 @@ query GetChannels {
 
 def fetch_channel_services(access_token):
     """Returns a dict mapping channel_id -> service name (e.g. 'facebook')."""
-    response = requests.post(
+    headers = {
+        "Authorization": f"Bearer {access_token}",
+        "Content-Type": "application/json",
+    }
+
+    org_response = requests.post(
         BUFFER_API_URL,
-        json={"query": GET_CHANNELS_QUERY},
-        headers={
-            "Authorization": f"Bearer {access_token}",
-            "Content-Type": "application/json",
-        },
+        json={"query": GET_ORGANIZATIONS_QUERY},
+        headers=headers,
         timeout=20,
     )
-    if not response.ok:
+    if not org_response.ok:
         raise RuntimeError(
-            f"HTTP {response.status_code} fetching channels: {response.text[:1000]}"
+            f"HTTP {org_response.status_code} fetching organizations: {org_response.text[:1000]}"
         )
-    body = response.json()
-    if "errors" in body:
-        raise RuntimeError(f"GraphQL errors fetching channels: {body['errors']}")
+    org_body = org_response.json()
+    if "errors" in org_body:
+        raise RuntimeError(f"GraphQL errors fetching organizations: {org_body['errors']}")
+
+    orgs = org_body.get("data", {}).get("account", {}).get("organizations", [])
+    if not orgs:
+        raise RuntimeError("No organizations found for this account.")
 
     mapping = {}
-    orgs = body.get("data", {}).get("account", {}).get("organizations", [])
     for org in orgs:
-        for channel in org.get("channels", []):
+        channels_response = requests.post(
+            BUFFER_API_URL,
+            json={"query": GET_CHANNELS_QUERY, "variables": {"organizationId": org["id"]}},
+            headers=headers,
+            timeout=20,
+        )
+        if not channels_response.ok:
+            raise RuntimeError(
+                f"HTTP {channels_response.status_code} fetching channels: {channels_response.text[:1000]}"
+            )
+        channels_body = channels_response.json()
+        if "errors" in channels_body:
+            raise RuntimeError(f"GraphQL errors fetching channels: {channels_body['errors']}")
+
+        for channel in channels_body.get("data", {}).get("channels", []):
             mapping[channel["id"]] = channel["service"]
+
     return mapping
 
 
