@@ -32,7 +32,8 @@ mutation CreatePinterestPost(
   $text: String!,
   $channelId: ChannelId!,
   $dueAt: DateTime!,
-  $imageUrl: String!
+  $imageUrl: String!,
+  $boardServiceId: String!
 ) {
   createPost(input: {
     text: $text,
@@ -42,7 +43,10 @@ mutation CreatePinterestPost(
     dueAt: $dueAt,
     assets: [
       { image: { url: $imageUrl } }
-    ]
+    ],
+    metadata: {
+      pinterest: { boardServiceId: $boardServiceId }
+    }
   }) {
     ... on PostActionSuccess {
       post { id text dueAt }
@@ -81,13 +85,14 @@ def build_pinterest_caption(product):
     return f"{name} - Rs {product['price']}. {angle}."
 
 
-def post_to_buffer(caption, link, image_url, channel_id, access_token):
+def post_to_buffer(caption, link, image_url, channel_id, board_service_id, access_token):
     scheduled_time = datetime.now(timezone.utc) + timedelta(hours=1)
     variables = {
         "text": f"{caption}\n{link}",
         "channelId": channel_id,
         "dueAt": scheduled_time.strftime("%Y-%m-%dT%H:%M:%S.000Z"),
         "imageUrl": image_url,
+        "boardServiceId": board_service_id,
     }
     response = requests.post(
         BUFFER_API_URL,
@@ -112,9 +117,10 @@ def post_to_buffer(caption, link, image_url, channel_id, access_token):
 def main():
     access_token = os.environ.get("BUFFER_ACCESS_TOKEN")
     channel_id = os.environ.get("PINTEREST_CHANNEL_ID", "").strip()
+    board_service_id = os.environ.get("PINTEREST_BOARD_SERVICE_ID", "").strip()
 
-    if not access_token or not channel_id:
-        print("Missing BUFFER_ACCESS_TOKEN or PINTEREST_CHANNEL_ID secrets.")
+    if not access_token or not channel_id or not board_service_id:
+        print("Missing BUFFER_ACCESS_TOKEN, PINTEREST_CHANNEL_ID, or PINTEREST_BOARD_SERVICE_ID secrets.")
         sys.exit(1)
 
     if not os.path.exists(CSV_PATH):
@@ -149,7 +155,7 @@ def main():
     print("Caption + link length:", len(caption) + len(link_full) + 1, "/ 500 max")
 
     try:
-        result = post_to_buffer(caption, link_full, image_url, channel_id, access_token)
+        result = post_to_buffer(caption, link_full, image_url, channel_id, board_service_id, access_token)
         print(f"Posted to pinterest channel {channel_id}:", result)
     except (requests.HTTPError, RuntimeError) as e:
         print(f"Failed to post to pinterest channel {channel_id}:", e)
