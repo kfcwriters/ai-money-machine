@@ -1,0 +1,39 @@
+name: Pinterest Test Post
+
+on:
+  workflow_dispatch: {}   # manual-only for now while we test - no schedule yet
+
+permissions:
+  contents: write
+
+jobs:
+  post-pinterest:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install requests
+
+      - name: Configure git for auto-commit
+        run: |
+          git config user.name "auto-poster-bot"
+          git config user.email "actions@github.com"
+
+      - name: Run Pinterest poster script
+        env:
+          BUFFER_ACCESS_TOKEN: ${{ secrets.BUFFER_ACCESS_TOKEN }}
+          PINTEREST_CHANNEL_ID: ${{ secrets.PINTEREST_CHANNEL_ID }}
+        run: python scripts/post_pinterest.py
+
+      - name: Commit updated pinterest_products.csv
+        run: |
+          git add pinterest_products.csv
+          git diff --quiet --cached || git commit -m "Mark Pinterest product as posted [skip ci]"
+          git push
